@@ -39,90 +39,9 @@ class _SellerOrdersManagementSectionState extends State<SellerOrdersManagementSe
   String _selectedStatusFilter = 'All';
   int _activeSubTab = 0; // 0: Orders List, 1: Logistics Partners
 
-  // Demo Fallback Orders if state.orders is empty
-  late List<AppOrder> _sampleOrders;
-
   @override
   void initState() {
     super.initState();
-    _sampleOrders = [
-      AppOrder(
-        id: 'ORD-984210',
-        productId: 'prod_1',
-        productName: 'Embroidered Cotton Kurta - Royal Blue (Size L)',
-        productPrice: 3500.0,
-        sellerId: widget.activeSellerId,
-        buyerName: 'Muhammad Usman',
-        shippingAddress: 'House 42, Block B, Gulberg III, Lahore',
-        shippingSpeed: 'Standard Express',
-        paymentMethod: 'Cash on Delivery',
-        couponDiscount: 200,
-        commissionDeducted: 150,
-        finalPayout: 3150,
-        orderStatus: 'Pending',
-      ),
-      AppOrder(
-        id: 'ORD-984211',
-        productId: 'prod_2',
-        productName: 'Wireless Bluetooth Earbuds Pro',
-        productPrice: 4200.0,
-        sellerId: widget.activeSellerId,
-        buyerName: 'Ayesha Khan',
-        shippingAddress: 'Flat 302, Sunrise Towers, PECHS, Karachi',
-        shippingSpeed: 'Fast Delivery',
-        paymentMethod: 'Digital Payment (Card)',
-        couponDiscount: 0,
-        commissionDeducted: 210,
-        finalPayout: 3990,
-        orderStatus: 'Confirmed',
-      ),
-      AppOrder(
-        id: 'ORD-984212',
-        productId: 'prod_3',
-        productName: 'Men Leather Formal Shoes - Tan (Size 42)',
-        productPrice: 6800.0,
-        sellerId: widget.activeSellerId,
-        buyerName: 'Bilal Farooq',
-        shippingAddress: 'Sector F-8/2, Street 14, Islamabad',
-        shippingSpeed: 'Standard Express',
-        paymentMethod: 'Cash on Delivery',
-        couponDiscount: 500,
-        commissionDeducted: 340,
-        finalPayout: 5960,
-        orderStatus: 'Packed',
-      ),
-      AppOrder(
-        id: 'ORD-984213',
-        productId: 'prod_4',
-        productName: 'Designer Silk Lawn Unstitched Suit',
-        productPrice: 5500.0,
-        sellerId: widget.activeSellerId,
-        buyerName: 'Saima Malik',
-        shippingAddress: 'Model Town, Link Road, Multan',
-        shippingSpeed: 'Standard Express',
-        paymentMethod: 'Cash on Delivery',
-        couponDiscount: 300,
-        commissionDeducted: 260,
-        finalPayout: 4940,
-        orderStatus: 'Shipped',
-        trackingNumber: 'APNA-EX-778901',
-      ),
-      AppOrder(
-        id: 'ORD-984214',
-        productId: 'prod_5',
-        productName: 'Smart Fitness Tracker Watch',
-        productPrice: 2900.0,
-        sellerId: widget.activeSellerId,
-        buyerName: 'Zubair Ahmed',
-        shippingAddress: 'Satellite Town, Block A, Rawalpindi',
-        shippingSpeed: 'Standard Express',
-        paymentMethod: 'Digital Payment (Easypaisa)',
-        couponDiscount: 100,
-        commissionDeducted: 145,
-        finalPayout: 2655,
-        orderStatus: 'Delivered',
-      ),
-    ];
   }
 
   @override
@@ -233,7 +152,7 @@ class _SellerOrdersManagementSectionState extends State<SellerOrdersManagementSe
   @override
   Widget build(BuildContext context) {
     final liveOrders = widget.state.orders.where((o) => o.sellerId == widget.activeSellerId || o.sellerId.startsWith('seller_')).toList();
-    final allOrders = liveOrders.isNotEmpty ? liveOrders : _sampleOrders;
+    final allOrders = liveOrders;
 
     final searchQuery = _searchCtrl.text.toLowerCase();
     final filtered = allOrders.where((o) {

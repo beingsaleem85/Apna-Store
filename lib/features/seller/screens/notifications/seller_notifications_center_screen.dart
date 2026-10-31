@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class SellerNotificationItem {
+class RealNotificationItem {
+  final String id;
   final String title;
   final String body;
-  final String time;
-  final String category; // 'Orders', 'Payouts', 'Logistics', 'Broadcast'
+  final String category;
   bool isRead;
+  final DateTime createdAt;
 
-  SellerNotificationItem({
+  RealNotificationItem({
+    required this.id,
     required this.title,
     required this.body,
-    required this.time,
     required this.category,
-    this.isRead = false,
+    required this.isRead,
+    required this.createdAt,
   });
 }
 
@@ -25,209 +28,189 @@ class SellerNotificationsCenterScreen extends StatefulWidget {
 
 class _SellerNotificationsCenterScreenState extends State<SellerNotificationsCenterScreen> {
   String _activeTab = 'All';
+  final List<RealNotificationItem> _notifications = [];
+  bool _isLoading = true;
 
-  bool _pushEnabled = true;
-  bool _smsEnabled = true;
-  bool _emailEnabled = true;
-  bool _soundEnabled = true;
+  @override
+  void initState() {
+    super.initState();
+    _fetchNotifications();
+  }
 
-  final List<SellerNotificationItem> _notifications = [
-    SellerNotificationItem(
-      title: 'New Order Received (ORD-9084)',
-      body: 'Customer Usman Tariq placed an order for Rs. 4,500 via COD.',
-      time: '10 mins ago',
-      category: 'Orders',
-    ),
-    SellerNotificationItem(
-      title: 'Bank Payout Settled Successfully',
-      body: 'Rs. 12,500 has been transferred to your Meezan Bank account.',
-      time: '1 hour ago',
-      category: 'Payouts',
-    ),
-    SellerNotificationItem(
-      title: 'Urgent SLA Warning: 4 Hours Left',
-      body: 'Pack and mark ORD-9081 as Ready to Ship to avoid SLA penalty points.',
-      time: '2 hours ago',
-      category: 'Logistics',
-    ),
-    SellerNotificationItem(
-      title: 'Super Admin Broadcast: 11.11 Festival Live',
-      body: 'Campaign registrations are now open for 11.11 Shopping Festival 2026.',
-      time: '1 day ago',
-      category: 'Broadcast',
-    ),
-  ];
+  Future<void> _fetchNotifications() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        setState(() {
+          _notifications.clear();
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final data = await Supabase.instance.client
+          .from('notifications')
+          .select('id, title, body, type, is_read, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(50);
+
+      if (mounted) {
+        setState(() {
+          _notifications.clear();
+          for (final row in (data as List)) {
+            _notifications.add(RealNotificationItem(
+              id: row['id'].toString(),
+              title: (row['title'] ?? 'Notification').toString(),
+              body: (row['body'] ?? '').toString(),
+              category: (row['type'] ?? 'General').toString(),
+              isRead: row['is_read'] == true,
+              createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ?? DateTime.now(),
+            ));
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _markAllRead() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+
+      await Supabase.instance.client
+          .from('notifications')
+          .update({'is_read': true})
+          .eq('user_id', user.id)
+          .eq('is_read', false);
+
+      setState(() {
+        for (final n in _notifications) {
+          n.isRead = true;
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All Notifications Marked as Read!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update notifications: $e')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final filtered = _notifications.where((n) {
       if (_activeTab == 'All') return true;
-      return n.category == _activeTab;
+      return n.category.toLowerCase() == _activeTab.toLowerCase();
     }).toList();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Notification Center & Alert Preferences'),
+        title: const Text('Seller Notification Center'),
         backgroundColor: const Color(0xFF004D40),
         actions: [
           TextButton(
-            onPressed: () {
-              setState(() {
-                for (var n in _notifications) {
-                  n.isRead = true;
-                }
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('All Notifications Marked as Read!')),
-              );
-            },
+            onPressed: _notifications.isEmpty ? null : _markAllRead,
             child: const Text('Mark All Read', style: TextStyle(color: Colors.white, fontSize: 12)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchNotifications,
+            tooltip: 'Refresh Notifications',
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Alert Preferences Card
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Notification Channel Preferences', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                    const SizedBox(height: 8),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SwitchListTile(
-                            dense: true,
-                            title: const Text('Mobile Push Alerts'),
-                            value: _pushEnabled,
-                            activeColor: const Color(0xFF004D40),
-                            onChanged: (val) => setState(() => _pushEnabled = val),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Filter Chips
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: ['All', 'Orders', 'Payouts', 'Logistics', 'Broadcast'].map((tab) {
+                        final isSel = _activeTab == tab;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: ChoiceChip(
+                            label: Text(tab, style: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                            selected: isSel,
+                            selectedColor: const Color(0xFF004D40),
+                            onSelected: (val) => setState(() => _activeTab = tab),
                           ),
-                        ),
-                        Expanded(
-                          child: SwitchListTile(
-                            dense: true,
-                            title: const Text('SMS Order Alerts'),
-                            value: _smsEnabled,
-                            activeColor: const Color(0xFF004D40),
-                            onChanged: (val) => setState(() => _smsEnabled = val),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SwitchListTile(
-                            dense: true,
-                            title: const Text('Email Daily Digest'),
-                            value: _emailEnabled,
-                            activeColor: const Color(0xFF004D40),
-                            onChanged: (val) => setState(() => _emailEnabled = val),
-                          ),
-                        ),
-                        Expanded(
-                          child: SwitchListTile(
-                            dense: true,
-                            title: const Text('Sound Cues on Order'),
-                            value: _soundEnabled,
-                            activeColor: const Color(0xFF004D40),
-                            onChanged: (val) => setState(() => _soundEnabled = val),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Category Filter Chips
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['All', 'Orders', 'Payouts', 'Logistics', 'Broadcast'].map((tab) {
-                  final isSel = _activeTab == tab;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: ChoiceChip(
-                      label: Text(tab, style: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
-                      selected: isSel,
-                      selectedColor: const Color(0xFF004D40),
-                      onSelected: (val) => setState(() => _activeTab = tab),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Notifications Feed
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: filtered.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.all(32.0),
-                      child: Center(child: Text('No notifications in this channel.')),
-                    )
-                  : ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: filtered.length,
-                      separatorBuilder: (ctx, i) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final n = filtered[index];
-
-                        return ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: n.category == 'Orders'
-                                ? Colors.green
-                                : n.category == 'Payouts'
-                                    ? const Color(0xFF004D40)
-                                    : n.category == 'Logistics'
-                                        ? Colors.orange
-                                        : Colors.purple,
-                            child: Icon(
-                              n.category == 'Orders'
-                                  ? Icons.shopping_bag
-                                  : n.category == 'Payouts'
-                                      ? Icons.account_balance_wallet
-                                      : n.category == 'Logistics'
-                                          ? Icons.local_shipping
-                                          : Icons.campaign,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                          ),
-                          title: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(n.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              Text(n.time, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                            ],
-                          ),
-                          subtitle: Text(n.body, style: const TextStyle(fontSize: 11)),
-                          onTap: () {
-                            setState(() => n.isRead = true);
-                          },
                         );
-                      },
+                      }).toList(),
                     ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Notifications List
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: filtered.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(40.0),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(Icons.notifications_none, size: 48, color: Colors.grey),
+                                  SizedBox(height: 12),
+                                  Text('No notifications found.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  SizedBox(height: 4),
+                                  Text('Alerts regarding orders, payouts, and announcements will appear here.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: filtered.length,
+                            separatorBuilder: (ctx, i) => const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final item = filtered[index];
+
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: item.isRead ? Colors.grey.shade200 : const Color(0xFFE0F2F1),
+                                  child: Icon(
+                                    Icons.notifications,
+                                    color: item.isRead ? Colors.grey : const Color(0xFF004D40),
+                                  ),
+                                ),
+                                title: Text(
+                                  item.title,
+                                  style: TextStyle(
+                                    fontWeight: item.isRead ? FontWeight.normal : FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  item.body,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }

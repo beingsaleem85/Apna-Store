@@ -1,24 +1,6 @@
 import 'package:flutter/material.dart';
-
-class OrderDispatchItem {
-  final String orderId;
-  final String customerName;
-  final String itemsSummary;
-  final double amount;
-  final String paymentMethod;
-  String status; // 'New Pending', 'Packed', 'Ready to Ship', 'Picked Up'
-  final DateTime orderTime;
-
-  OrderDispatchItem({
-    required this.orderId,
-    required this.customerName,
-    required this.itemsSummary,
-    required this.amount,
-    required this.paymentMethod,
-    required this.status,
-    required this.orderTime,
-  });
-}
+import 'package:provider/provider.dart';
+import '../../../../core/services/app_state_provider.dart';
 
 class SellerOrderDispatchScreen extends StatefulWidget {
   const SellerOrderDispatchScreen({super.key});
@@ -31,39 +13,34 @@ class _SellerOrderDispatchScreenState extends State<SellerOrderDispatchScreen> {
   String _activeTab = 'New Pending';
   final Set<String> _selectedOrderIds = {};
 
-  final List<OrderDispatchItem> _orders = [
-    OrderDispatchItem(
-      orderId: 'ORD-9081',
-      customerName: 'Ali Raza',
-      itemsSummary: '1x Embroidered Lawn 3-Piece Suit (Black - Medium)',
-      amount: 2999.0,
-      paymentMethod: 'Cash on Delivery (COD)',
-      status: 'New Pending',
-      orderTime: DateTime.now().subtract(const Duration(hours: 3)),
-    ),
-    OrderDispatchItem(
-      orderId: 'ORD-9082',
-      customerName: 'Saima Khan',
-      itemsSummary: '2x Organic Sidr Honey 500g',
-      amount: 3200.0,
-      paymentMethod: 'Prepaid Wallet',
-      status: 'Packed',
-      orderTime: DateTime.now().subtract(const Duration(hours: 6)),
-    ),
-    OrderDispatchItem(
-      orderId: 'ORD-9083',
-      customerName: 'Usman Tariq',
-      itemsSummary: '1x Men Leather Jacket (Brown - XL)',
-      amount: 4500.0,
-      paymentMethod: 'Cash on Delivery (COD)',
-      status: 'Ready to Ship',
-      orderTime: DateTime.now().subtract(const Duration(hours: 12)),
-    ),
-  ];
+  String _mapStatusToTab(String orderStatus) {
+    switch (orderStatus.toLowerCase()) {
+      case 'pending':
+      case 'confirmed':
+        return 'New Pending';
+      case 'packed':
+        return 'Packed';
+      case 'shipped':
+        return 'Ready to Ship';
+      case 'delivered':
+        return 'Picked Up';
+      default:
+        return 'New Pending';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final filteredOrders = _orders.where((o) => o.status == _activeTab).toList();
+    final state = Provider.of<AppStateProvider>(context);
+    final sellerId = state.loggedInSellerId ?? '';
+
+    // Only real orders belonging to the logged-in seller
+    final sellerOrders = state.orders.where((o) {
+      if (sellerId.isEmpty) return true;
+      return o.sellerId == sellerId || o.sellerId.startsWith('seller_');
+    }).toList();
+
+    final filteredOrders = sellerOrders.where((o) => _mapStatusToTab(o.orderStatus) == _activeTab).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -89,9 +66,9 @@ class _SellerOrderDispatchScreenState extends State<SellerOrderDispatchScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Fulfillment SLA Timer: 8 Hours Remaining', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                          Text('Fulfillment SLA Timer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                           SizedBox(height: 2),
-                          Text('Pack and mark "Ready to Ship" to avoid late shipment score penalties.', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                          Text('Pack and mark "Ready to Ship" within SLA to maintain high seller fulfillment ratings.', style: TextStyle(color: Colors.white70, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -156,9 +133,19 @@ class _SellerOrderDispatchScreenState extends State<SellerOrderDispatchScreen> {
               elevation: 2,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: filteredOrders.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.all(32.0),
-                      child: Center(child: Text('No orders currently in this status.')),
+                  ? Padding(
+                      padding: const EdgeInsets.all(40.0),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            const Icon(Icons.inbox_outlined, size: 48, color: Colors.grey),
+                            const SizedBox(height: 12),
+                            Text('No orders in "$_activeTab" queue.', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            const SizedBox(height: 4),
+                            const Text('When orders enter this state, they will appear here.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                          ],
+                        ),
+                      ),
                     )
                   : ListView.separated(
                       shrinkWrap: true,
@@ -167,36 +154,36 @@ class _SellerOrderDispatchScreenState extends State<SellerOrderDispatchScreen> {
                       separatorBuilder: (ctx, i) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final order = filteredOrders[index];
-                        final isChecked = _selectedOrderIds.contains(order.orderId);
+                        final isChecked = _selectedOrderIds.contains(order.id);
 
                         return CheckboxListTile(
                           value: isChecked,
                           onChanged: (val) {
                             setState(() {
                               if (val == true) {
-                                _selectedOrderIds.add(order.orderId);
+                                _selectedOrderIds.add(order.id);
                               } else {
-                                _selectedOrderIds.remove(order.orderId);
+                                _selectedOrderIds.remove(order.id);
                               }
                             });
                           },
                           title: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('${order.orderId} — ${order.customerName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              Text('Rs. ${order.amount.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF004D40))),
+                              Text('${order.id} — ${order.buyerName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              Text('Rs. ${order.finalPayout.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF004D40))),
                             ],
                           ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(order.itemsSummary, style: const TextStyle(fontSize: 11)),
+                              Text(order.productName, style: const TextStyle(fontSize: 11)),
                               const SizedBox(height: 4),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(order.paymentMethod, style: const TextStyle(fontSize: 10, color: Colors.blueGrey, fontWeight: FontWeight.bold)),
-                                  _buildActionButton(order),
+                                  _buildActionButton(order, state),
                                 ],
                               ),
                             ],
@@ -211,29 +198,34 @@ class _SellerOrderDispatchScreenState extends State<SellerOrderDispatchScreen> {
     );
   }
 
-  Widget _buildActionButton(OrderDispatchItem order) {
-    if (order.status == 'New Pending') {
+  Widget _buildActionButton(AppOrder order, AppStateProvider state) {
+    final status = order.orderStatus.toLowerCase();
+    if (status == 'pending' || status == 'confirmed') {
       return ElevatedButton.icon(
         icon: const Icon(Icons.inventory_2, size: 14),
         label: const Text('Pack Order', style: TextStyle(fontSize: 11)),
         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF004D40), foregroundColor: Colors.white),
-        onPressed: () {
-          setState(() => order.status = 'Packed');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Order ${order.orderId} Packed & Invoiced!')),
-          );
+        onPressed: () async {
+          await state.updateOrderStatus(order.id, 'Packed');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Order ${order.id} marked Packed!')),
+            );
+          }
         },
       );
-    } else if (order.status == 'Packed') {
+    } else if (status == 'packed') {
       return ElevatedButton.icon(
         icon: const Icon(Icons.local_shipping, size: 14),
         label: const Text('Ready to Ship', style: TextStyle(fontSize: 11)),
         style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
-        onPressed: () {
-          setState(() => order.status = 'Ready to Ship');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Order ${order.orderId} Marked Ready for Courier Pickup!')),
-          );
+        onPressed: () async {
+          await state.updateOrderStatus(order.id, 'Shipped');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Order ${order.id} marked Ready to Ship!')),
+            );
+          }
         },
       );
     } else {
@@ -242,7 +234,7 @@ class _SellerOrderDispatchScreenState extends State<SellerOrderDispatchScreen> {
         label: const Text('Print AWB Label', style: TextStyle(fontSize: 11)),
         onPressed: () {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Printing Airway Bill Label for ${order.orderId}...')),
+            SnackBar(content: Text('Printing Airway Bill Label for ${order.id}...')),
           );
         },
       );
