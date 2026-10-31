@@ -1,9 +1,9 @@
 -- ============================================================================
--- SQL Test: Task A1 - Chat Rooms Concurrency, Order Validation & Realtime RLS Tests
+-- SQL Test: Task A1 - Chat Rooms Idempotency, Order Validation & Realtime RLS Tests
 -- ============================================================================
 
 BEGIN;
-SELECT plan(4);
+SELECT plan(5);
 
 -- 1. Test: Suspended or unapproved store is rejected by create_chat_room
 SELECT throws_like(
@@ -29,21 +29,19 @@ SELECT throws_like(
     'create_chat_room validates order belongs to calling buyer'
 );
 
--- 3. Test: Duplicate room attempt returns the same room ID (idempotency under concurrency)
+-- 3. Test: Idempotent room creation: duplicate room attempt returns identical room ID
 DO $$
 DECLARE
     v_buyer_id UUID := gen_random_uuid();
     v_store_id UUID := gen_random_uuid();
     v_room1_id UUID;
     v_room2_id UUID;
-    v_res1 JSONB;
-    v_res2 JSONB;
 BEGIN
     -- Insert test store
     INSERT INTO public.seller_stores (id, owner_id, name, shop_slug, is_approved, is_suspended)
     VALUES (v_store_id, gen_random_uuid(), 'Test Store Realtime', 'test-store-rt', TRUE, FALSE);
 
-    -- Insert mock room
+    -- Insert initial room
     INSERT INTO public.chat_rooms (buyer_user_id, seller_store_id, product_id)
     VALUES (v_buyer_id, v_store_id, NULL)
     RETURNING id INTO v_room1_id;
@@ -60,13 +58,57 @@ BEGIN
     WHERE buyer_user_id = v_buyer_id AND seller_store_id = v_store_id AND product_id IS NULL;
 
     IF v_room1_id = v_room2_id THEN
-        PERFORM pass('Duplicate room attempt returns the identical canonical room ID');
+        PERFORM pass('Idempotent room creation: duplicate room attempt returns the identical canonical room ID');
     ELSE
-        PERFORM fail('Duplicate room attempt created a duplicate room row');
+        PERFORM fail('Idempotent room creation failed: created duplicate room row');
     END IF;
 END $$;
 
--- 4. Test: Non-participant cannot select another room messages under RLS
+-- 4. Test: Idempotent room creation with product: second call with same buyer, store and product returns the same room_id and creates exactly one row
+DO $$
+DECLARE
+    v_buyer_id UUID := gen_random_uuid();
+    v_store_id UUID := gen_random_uuid();
+    v_product_id UUID := gen_random_uuid();
+    v_cat_id UUID := gen_random_uuid();
+    v_room1_id UUID;
+    v_room2_id UUID;
+    v_total_rows INT;
+BEGIN
+    -- Setup store & product category
+    INSERT INTO public.seller_stores (id, owner_id, name, shop_slug, is_approved, is_suspended)
+    VALUES (v_store_id, gen_random_uuid(), 'Test Store Product Chat', 'test-store-prod', TRUE, FALSE);
+
+    INSERT INTO public.categories (id, name, slug)
+    VALUES (v_cat_id, 'Apparel', 'apparel-test-cat');
+
+    INSERT INTO public.products (id, seller_store_id, category_id, name, slug, price, stock_quantity)
+    VALUES (v_product_id, v_store_id, v_cat_id, 'Lawn Suit', 'lawn-suit-test', 2500.00, 10);
+
+    -- Switch auth context to buyer
+    PERFORM set_config('request.jwt.claim.sub', v_buyer_id::text, true);
+
+    -- Call 1
+    SELECT (public.create_chat_room(v_store_id, v_product_id, NULL) ->> 'room_id')::UUID INTO v_room1_id;
+
+    -- Call 2
+    SELECT (public.create_chat_room(v_store_id, v_product_id, NULL) ->> 'room_id')::UUID INTO v_room2_id;
+
+    -- Count total rows in chat_rooms for this tuple
+    SELECT COUNT(*) INTO v_total_rows
+    FROM public.chat_rooms
+    WHERE buyer_user_id = v_buyer_id
+      AND seller_store_id = v_store_id
+      AND product_id = v_product_id;
+
+    IF v_room1_id = v_room2_id AND v_total_rows = 1 THEN
+        PERFORM pass('Second call with same buyer, store and product returns same room_id and creates exactly one row');
+    ELSE
+        PERFORM fail('Idempotent creation with product failed: room1=' || COALESCE(v_room1_id::text, 'null') || ' room2=' || COALESCE(v_room2_id::text, 'null') || ' total=' || v_total_rows);
+    END IF;
+END $$;
+
+-- 5. Test: Non-participant cannot select another room messages under RLS
 DO $$
 DECLARE
     v_attacker_id UUID := gen_random_uuid();

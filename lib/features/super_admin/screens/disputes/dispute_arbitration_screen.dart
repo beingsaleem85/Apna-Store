@@ -8,13 +8,14 @@ import '../../services/super_admin_provider.dart';
 
 class DisputeClaim {
   final String id;
+  final String rawId;
   final String orderId;
   final String productName;
   final String buyerName;
   final String sellerStoreName;
   final String returnReason;
   final double requestedAmount;
-  String disputeStatus; // 'Pending', 'Full Refund Approved', 'Partial Refund Approved', 'Rejected'
+  String disputeStatus; // 'Pending', 'Full Refund Approved', 'Partial Refund Approved', 'Rejected', 'Completed'
   final DateTime date;
   final bool isMerchantDispute;
   final String returnTracking;
@@ -22,6 +23,7 @@ class DisputeClaim {
 
   DisputeClaim({
     required this.id,
+    required this.rawId,
     required this.orderId,
     required this.productName,
     required this.buyerName,
@@ -82,6 +84,7 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
           for (final row in res) {
             _claims.add(DisputeClaim(
               id: (row['id'] ?? '').toString().substring(0, 8).toUpperCase(),
+              rawId: (row['id'] ?? '').toString(),
               orderId: (row['order_id'] ?? '').toString(),
               productName: 'Order Item #${row['order_id']}',
               buyerName: 'Verified Buyer',
@@ -806,9 +809,21 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
                         confirmColor: const Color(0xFF0D9488),
                       );
                       if (confirmed) {
-                        setState(() => claim.disputeStatus = 'Full Refund Approved');
-                        adminState.logAuditAction('DISPUTE_FULL_REFUND', claim.id, 'Approved full refund of PKR ${claim.requestedAmount.toInt()}');
-                        if (mounted) SuperAdminDialogs.showToast(context, 'Full Refund Approved!');
+                        try {
+                          await Supabase.instance.client.rpc(
+                            'admin_arbitrate_return_claim',
+                            params: {
+                              'p_claim_id': claim.rawId,
+                              'p_decision': 'Approved',
+                              'p_notes': 'Full refund approved by Super Admin',
+                            },
+                          );
+                          setState(() => claim.disputeStatus = 'Full Refund Approved');
+                          adminState.logAuditAction('DISPUTE_FULL_REFUND', claim.id, 'Approved full refund of PKR ${claim.requestedAmount.toInt()}');
+                          if (mounted) SuperAdminDialogs.showToast(context, 'Full Refund Approved!');
+                        } catch (e) {
+                          if (mounted) SuperAdminDialogs.showToast(context, 'Arbitration failed: $e', isError: true);
+                        }
                       }
                     },
                     child: const Text('Approve Refund', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
@@ -830,9 +845,21 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
                         hintText: 'Enter reason for rejecting return claim...',
                       );
                       if (reason != null && reason.isNotEmpty) {
-                        setState(() => claim.disputeStatus = 'Rejected');
-                        adminState.logAuditAction('DISPUTE_REJECTED', claim.id, 'Rejected claim. Reason: $reason');
-                        if (mounted) SuperAdminDialogs.showToast(context, 'Claim Rejected.', isError: true);
+                        try {
+                          await Supabase.instance.client.rpc(
+                            'admin_arbitrate_return_claim',
+                            params: {
+                              'p_claim_id': claim.rawId,
+                              'p_decision': 'Rejected',
+                              'p_notes': reason,
+                            },
+                          );
+                          setState(() => claim.disputeStatus = 'Rejected');
+                          adminState.logAuditAction('DISPUTE_REJECTED', claim.id, 'Rejected claim. Reason: $reason');
+                          if (mounted) SuperAdminDialogs.showToast(context, 'Claim Rejected.', isError: true);
+                        } catch (e) {
+                          if (mounted) SuperAdminDialogs.showToast(context, 'Arbitration failed: $e', isError: true);
+                        }
                       }
                     },
                     child: const Text('Reject Claim', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
