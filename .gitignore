@@ -1,0 +1,58 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+analyze_output.txt
+
+# Temporary Office and OS lock files
+~$*
+~WRL*.tmp
+
+# IntelliJ / Android Studio / IDE related
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Node.js
+node_modules/
+
+# Android local SDK configuration
+android/local.properties
+android/key.properties
+*.keystore
+*.jks
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Symbolication & Obfuscation
+app.*.symbols
+app.*.map.json
+
+# Android build outputs
+/android/app/debug
+/android/app/profile
+/android/app/release
