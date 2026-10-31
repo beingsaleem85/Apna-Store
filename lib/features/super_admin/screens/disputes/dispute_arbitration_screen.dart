@@ -561,9 +561,21 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
                                       confirmColor: const Color(0xFF0D9488),
                                     );
                                     if (confirmed) {
-                                      setState(() => claim.disputeStatus = 'Full Refund Approved');
-                                      adminState.logAuditAction('DISPUTE_FULL_REFUND', claim.id, 'Approved full refund of PKR ${claim.requestedAmount.toInt()}');
-                                      if (mounted) SuperAdminDialogs.showToast(context, 'Full Refund Approved!');
+                                      try {
+                                        await Supabase.instance.client.rpc(
+                                          'admin_arbitrate_return_claim',
+                                          params: {
+                                            'p_claim_id': claim.rawId,
+                                            'p_decision': 'Approved',
+                                            'p_notes': 'Full refund approved by Super Admin in table view',
+                                          },
+                                        );
+                                        setState(() => claim.disputeStatus = 'Full Refund Approved');
+                                        adminState.logAuditAction('DISPUTE_FULL_REFUND', claim.id, 'Approved full refund of PKR ${claim.requestedAmount.toInt()}');
+                                        if (mounted) SuperAdminDialogs.showToast(context, 'Full Refund Approved!');
+                                      } catch (e) {
+                                        if (mounted) SuperAdminDialogs.showToast(context, 'Arbitration failed: $e', isError: true);
+                                      }
                                     }
                                   },
                                   child: const Text('Full Refund', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
