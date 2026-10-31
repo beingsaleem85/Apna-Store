@@ -49,6 +49,7 @@ class _SellerCustomerChatScreenState extends State<SellerCustomerChatScreen> {
   bool _isLoadingRooms = true;
   bool _isLoadingMessages = false;
   final TextEditingController _msgController = TextEditingController();
+  RealtimeChannel? _realtimeChannel;
 
   @override
   void initState() {
@@ -58,8 +59,33 @@ class _SellerCustomerChatScreenState extends State<SellerCustomerChatScreen> {
 
   @override
   void dispose() {
+    _realtimeChannel?.unsubscribe();
     _msgController.dispose();
     super.dispose();
+  }
+
+  void _subscribeToRoom(String roomId) {
+    _realtimeChannel?.unsubscribe();
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('public:chat_messages:seller:$roomId')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'chat_messages',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'room_id',
+              value: roomId,
+            ),
+            callback: (payload) {
+              if (mounted) {
+                _fetchMessages(roomId, silent: true);
+              }
+            },
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _fetchChatRooms() async {
@@ -115,6 +141,7 @@ class _SellerCustomerChatScreenState extends State<SellerCustomerChatScreen> {
           }
           if (_rooms.isNotEmpty) {
             _selectedRoom = _rooms.first;
+            _subscribeToRoom(_selectedRoom!.id);
             _fetchMessages(_selectedRoom!.id);
           }
           _isLoadingRooms = false;
@@ -125,8 +152,8 @@ class _SellerCustomerChatScreenState extends State<SellerCustomerChatScreen> {
     }
   }
 
-  Future<void> _fetchMessages(String roomId) async {
-    setState(() => _isLoadingMessages = true);
+  Future<void> _fetchMessages(String roomId, {bool silent = false}) async {
+    if (!silent) setState(() => _isLoadingMessages = true);
     try {
       final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
       final data = await Supabase.instance.client
@@ -247,6 +274,7 @@ class _SellerCustomerChatScreenState extends State<SellerCustomerChatScreen> {
                               ),
                               onTap: () {
                                 setState(() => _selectedRoom = room);
+                                _subscribeToRoom(room.id);
                                 _fetchMessages(room.id);
                               },
                             );

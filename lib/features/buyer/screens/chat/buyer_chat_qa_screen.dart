@@ -33,6 +33,7 @@ class _BuyerChatQaScreenState extends State<BuyerChatQaScreen> with SingleTicker
   String _sellerStoreName = 'Seller Support';
   final List<BuyerChatMessageItem> _messages = [];
   bool _isLoading = true;
+  RealtimeChannel? _realtimeChannel;
 
   final List<Map<String, String>> _publicQaList = [
     {
@@ -58,9 +59,34 @@ class _BuyerChatQaScreenState extends State<BuyerChatQaScreen> with SingleTicker
 
   @override
   void dispose() {
+    _realtimeChannel?.unsubscribe();
     _tabController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  void _subscribeToRoom(String roomId) {
+    _realtimeChannel?.unsubscribe();
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('public:chat_messages:$roomId')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'chat_messages',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'room_id',
+              value: roomId,
+            ),
+            callback: (payload) {
+              if (mounted) {
+                _fetchMessages(roomId);
+              }
+            },
+          )
+          .subscribe();
+    } catch (_) {}
   }
 
   Future<void> _initializeChat() async {
@@ -93,6 +119,7 @@ class _BuyerChatQaScreenState extends State<BuyerChatQaScreen> with SingleTicker
       }
 
       if (_activeRoomId != null) {
+        _subscribeToRoom(_activeRoomId!);
         await _fetchMessages(_activeRoomId!);
       }
     } catch (_) {}
@@ -173,6 +200,9 @@ class _BuyerChatQaScreenState extends State<BuyerChatQaScreen> with SingleTicker
         );
 
         _activeRoomId = res is Map ? res['room_id']?.toString() : res?.toString();
+        if (_activeRoomId != null) {
+          _subscribeToRoom(_activeRoomId!);
+        }
       }
 
       if (_activeRoomId != null) {
