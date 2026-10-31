@@ -7,12 +7,12 @@
 ## 1. Executive Summary & Current Health
 
 - **Project Name:** Apna Store (Multi-Vendor E-Commerce Marketplace)
-- **Tech Stack:** Flutter 3.44 / Dart 3.12 · Supabase (PostgreSQL 15+ + GoTrue + Storage) · Provider State Management
-- **Repository Location:** `D:\apna store`
+- **Tech Stack:** Flutter 3.24+ / Dart 3.5+ · Supabase (PostgreSQL 15+ + GoTrue + Storage) · Provider State Management
+- **Repository Location:** `D:\apna store original`
 - **Current Health Status (Verified):**
-  - **Automated Tests:** `302 / 302 PASSED (100%)` across all 15 test suites in `test/`.
-  - **Static Analysis:** `0 errors, 0 warnings` via `flutter analyze`.
-  - **Code Hygiene:** Cleaned of all temporary cache files, `.docx`, `.iml`, `node_modules/`, and scratch scripts.
+  - **Automated Tests:** `321 / 321 PASSED (100%)` across all test suites in `test/`.
+  - **Static Analysis:** `0 errors` across workspace (`flutter analyze lib/`).
+  - **Code Hygiene:** Cleaned of all temporary cache files, unnumbered migrations safely archived to `supabase/archive/`.
   - **Security & RLS:** 100% server-authoritative with column-level `REVOKE` and `SECURITY DEFINER` RPCs.
 
 ---
@@ -86,11 +86,23 @@ The following sequential migrations contain the complete database schema:
 
 | File | Purpose |
 |---|---|
-| `20260810000000_phase_a_stop_the_bleeding.sql` | Strict RLS, column revokes, private profiles, `user_roles` table |
-| `20260811000000_phase_b_core_marketplace.sql` | `create_atomic_order` RPC, stock locks, `store_fulfillments`, reviews |
-| `20260812000000_phase_b_step_g_reviews_moderation.sql` | Reviews security & moderation RPCs |
-| `20260813000000_phase_c_seller_admin_ops.sql` | Admin governance RPCs, 12-role RBAC, `seller_payout_requests` table & RPCs |
-| `20260814000000_phase_e_growth_payments_variants.sql` | Multi-payments (JazzCash/Easypaisa/Card), `user_wishlists` table, Flash Sales & Tracking RPCs |
+| `20260715000000_init_schema.sql` | Initial extensions, UUID generation, core schema scaffolding |
+| `20260805000000_authoritative_schema_and_rls.sql` | Base marketplace tables (profiles, stores, products, orders) and strict RLS |
+| `20260806000000_phase_6_rbac_admin_audit.sql` | Admin RBAC role definitions and audit log infrastructure |
+| `20260807000000_phase_7_storage_and_kyc_security.sql` | Storage buckets (kyc, product images) and storage security policies |
+| `20260808000000_phase_8_catalog_and_inventory.sql` | Catalog variants, brands, categories tree and inventory control |
+| `20260809000000_phase_9_cart_checkout_atomic_orders.sql` | `create_atomic_order` RPC, stock locks, order line totals |
+| `20260810000000_phase_10_financial_ledger_payouts_refunds.sql` | Double-entry financial ledger, payout requests, escrow and balances |
+| `20260811000000_phase_11_orders_returns_reviews_chat_notifications.sql` | Fulfillment tracking, returns lifecycle, verified purchase reviews, live notifications |
+| `20260812000000_phase_b_unified_roles_and_tables.sql` | Unified user_roles authority and foreign key integrity |
+| `20260813000000_phase_c_seller_admin_ops.sql` | Seller operations and super admin moderation RPCs |
+| `20260814000000_phase_e_growth_payments_variants.sql` | Wishlists persistence, tracking events RPC, flash sale engine |
+| `20260815000000_task1_payment_safety_guard.sql` | Interim safety guard: Cash on Delivery strictly enforced, online gateways locked |
+| `20260816000000_task2_platform_integrations_no_secrets.sql` | Platform integrations table, zero secrets in client, secrets setup guide |
+| `20260817000000_task3_real_vouchers_and_redemptions.sql` | Server-authoritative vouchers, redemption tracking, validate_voucher RPC |
+| `20260818000000_task5_super_admin_governance.sql` | Commission rules, support tickets, CMS banners, broadcast notifications |
+| `20260819000000_task7_security_hardening.sql` | Anti-abuse rate limiter, input length CHECK constraints, security definers |
+| `20260820000000_task9_performance_indexes.sql` | Production indexes on hot catalog, orders, tickets, and notifications |
 
 ---
 

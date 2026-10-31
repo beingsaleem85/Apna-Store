@@ -183,3 +183,43 @@
 - `test/task5_super_admin_governance_test.dart` (4 tests covering session initialization, RBAC checks, commission model, and customer model). All 4 passed!
 
 ---
+
+
+## TASK 6 — Break Up Giant Files: COMPLETED
+- Decomposed monolithic `buyer_dashboard.dart` by extracting 1,948 lines of bottom widget cards into `lib/features/buyer/widgets/dashboard/buyer_dashboard_cards.dart` using modular `part` directive.
+- Preserved internal class bindings without breaking dependent unit tests.
+- Full test suite passed (318/318).
+
+---
+
+## TASK 7 — Security Hardening & Web Policies: COMPLETED
+- Configured production security headers in `vercel.json` (`Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`).
+- Added OpenGraph and SEO meta tags to `web/index.html`.
+- Created `web/robots.txt` restricting sensitive admin and seller routes from web crawler indexing.
+- Created migration `supabase/migrations/20260819000000_task7_security_hardening.sql`:
+  - `rate_limit_events` table and `enforce_rate_limit` `SECURITY DEFINER` function with strict search path.
+  - CHECK constraints on `support_tickets` (subject length 3-255), `product_reviews` (rating 1-5, comment length 2-2000), and `vouchers` (code alphanumeric format and positive value).
+- Added `supabase/tests/task7_security_penetration_test.sql` and `test/task7_security_test.dart` (3/3 PASSED).
+
+---
+
+## TASK 8 — Repo Hygiene and Documentation: COMPLETED
+- Moved unnumbered migrations `all_migrations_combined.sql` and `update_meta.sql` into `supabase/archive/` to ensure clean sequential `supabase db push`.
+- Initialized local Git repository, verified `.gitignore` excludes `build/`, `.dart_tool/`, `.idea/`, `.env`, and created clean initial commit.
+- Updated `HANDOFF.md` with verified repository directory (`D:\apna store original`), all 17 sequential migrations, and test counts.
+
+---
+
+## TASK 9 — Launch Readiness (Non-Payment): COMPLETED
+- Created database performance indexes migration: `supabase/migrations/20260820000000_task9_performance_indexes.sql` targeting hot queries across `products`, `orders`, `order_items`, `notifications`, `vouchers`, and `support_tickets`.
+- Created `docs/LAUNCH_CHECKLIST.md` detailing infrastructure, operational, and rollback procedures.
+- Created `docs/QA_SMOKE_TEST.md` with full step-by-step end-to-end verification workflows for Buyer, Seller, and Super Admin portals.
+- Verified all legal routes and policies.
+
+---
+
+## FINAL SYSTEM AUDIT SUMMARY
+- **`flutter analyze lib/`**: 0 ERRORS.
+- **`flutter test`**: 321 / 321 PASSED (100% pass rate).
+- **Payment Safety Guard**: Cash on Delivery strictly enforced (`onlinePaymentsEnabled = false`).
+- **All 9 Pre-Launch Tasks**: FULLY COMPLETED. Task 10 (Payment Gateway) reserved for separate session as required.
