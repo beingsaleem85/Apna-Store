@@ -3,7 +3,7 @@
 -- ============================================================================
 
 BEGIN;
-SELECT plan(18);
+SELECT plan(26);
 
 -- ----------------------------------------------------------------------------
 -- 0. SEED TEST FIXTURES & USERS IN auth.users
@@ -23,11 +23,15 @@ INSERT INTO auth.users (id, email) VALUES
     ('10000000-0000-0000-0000-000000000018', 'staff_marketingManager@test.com'),
     ('10000000-0000-0000-0000-000000000019', 'staff_fraudAnalyst@test.com'),
     ('10000000-0000-0000-0000-000000000020', 'staff_reportingAnalyst@test.com'),
-    ('10000000-0000-0000-0000-000000000021', 'staff_auditor@test.com')
+    ('10000000-0000-0000-0000-000000000021', 'staff_auditor@test.com'),
+    -- Role assignment target user
+    ('10000000-0000-0000-0000-000000000099', 'staff_assign_target@test.com')
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Staff Roles in user_roles
 INSERT INTO public.user_roles (user_id, role, staff_role) VALUES
+    ('10000000-0000-0000-0000-000000000001', 'buyer'::public.app_role, NULL),
+    ('10000000-0000-0000-0000-000000000002', 'seller'::public.app_role, NULL),
     ('10000000-0000-0000-0000-000000000010', 'owner'::public.app_role, 'owner'::public.admin_staff_role),
     ('10000000-0000-0000-0000-000000000011', 'super_admin'::public.app_role, 'superAdmin'::public.admin_staff_role),
     ('10000000-0000-0000-0000-000000000012', 'admin'::public.app_role, 'disputeManager'::public.admin_staff_role),
@@ -74,13 +78,25 @@ VALUES
     ('55555555-0000-0000-0000-000000000002', 'ORD-COD-SHIPPED', '44444444-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Item 2', 'SKU-2', 2500.00, 1, 2500.00, 10.00)
 ON CONFLICT (id) DO NOTHING;
 
--- Seed Return Claims
+-- Seed Separate Return Claims for each scenario:
+-- Claim 1: Owner test
+-- Claim 2: superAdmin test
+-- Claim 3: disputeManager test
+-- Claim 4: Denied roles tests
+-- Claim 5: Missing notes test
+-- Claim 6: Already completed claim
+-- Claim 7: Shipped COD uncollected
+-- Claim 8: Approved refund & duplicate test
 INSERT INTO public.return_requests (id, order_id, order_item_id, seller_store_id, customer_user_id, return_reason, quantity, status)
 VALUES
-    ('20000000-0000-0000-0000-000000000001', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Defective', 1, 'Requested'),
-    ('20000000-0000-0000-0000-000000000002', 'ORD-COD-SHIPPED', '55555555-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Shipped COD refund attempt', 1, 'Requested'),
-    ('20000000-0000-0000-0000-000000000003', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Already processed', 1, 'Completed'),
-    ('20000000-0000-0000-0000-000000000004', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Approve test', 1, 'Requested')
+    ('20000000-0000-0000-0000-000000000001', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 1 for Owner', 1, 'Requested'),
+    ('20000000-0000-0000-0000-000000000002', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 2 for SuperAdmin', 1, 'Requested'),
+    ('20000000-0000-0000-0000-000000000003', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 3 for DisputeManager', 1, 'Requested'),
+    ('20000000-0000-0000-0000-000000000004', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 4 for Denied Roles', 1, 'Requested'),
+    ('20000000-0000-0000-0000-000000000005', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 5 for Notes validation', 1, 'Requested'),
+    ('20000000-0000-0000-0000-000000000006', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 6 Already completed', 1, 'Completed'),
+    ('20000000-0000-0000-0000-000000000007', 'ORD-COD-SHIPPED', '55555555-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 7 Shipped COD uncollected', 1, 'Requested'),
+    ('20000000-0000-0000-0000-000000000008', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 8 Approval test', 1, 'Requested')
 ON CONFLICT (id) DO NOTHING;
 
 -- ----------------------------------------------------------------------------
@@ -96,47 +112,42 @@ SELECT throws_like(
 );
 
 -- ----------------------------------------------------------------------------
--- 2-13. ASSERTIONS: 12 Staff Roles RBAC Matrix Evaluation
--- Allowed: owner, superAdmin, disputeManager
--- Denied: financeAdmin, sellerManager, supportAdmin, catalogManager, orderManager, marketingManager, fraudAnalyst, reportingAnalyst, auditor
+-- 2-4. ASSERTIONS: Allowed Roles Succeed on Separate Dedicated Claims
 -- ----------------------------------------------------------------------------
 
--- Role 1: owner (Allowed)
+-- Role: owner on Claim 1
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000010', true);
 SELECT is(
-    (public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Owner reject') ->> 'success')::BOOLEAN,
+    (public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Owner reject on claim 1') ->> 'success')::BOOLEAN,
     TRUE,
-    '2. Staff role: owner succeeds'
+    '2. Staff role: owner succeeds on separate claim 1'
 );
 
--- Reset claim 1 for subsequent role tests
-UPDATE public.return_requests SET status = 'Requested' WHERE id = '20000000-0000-0000-0000-000000000001';
-
--- Role 2: superAdmin (Allowed)
+-- Role: superAdmin on Claim 2
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
 SELECT is(
-    (public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'SuperAdmin reject') ->> 'success')::BOOLEAN,
+    (public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000002'::uuid, 'Rejected', 'SuperAdmin reject on claim 2') ->> 'success')::BOOLEAN,
     TRUE,
-    '3. Staff role: superAdmin succeeds'
+    '3. Staff role: superAdmin succeeds on separate claim 2'
 );
 
-UPDATE public.return_requests SET status = 'Requested' WHERE id = '20000000-0000-0000-0000-000000000001';
-
--- Role 3: disputeManager (Allowed)
+-- Role: disputeManager on Claim 3
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000012', true);
 SELECT is(
-    (public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'DisputeManager reject') ->> 'success')::BOOLEAN,
+    (public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000003'::uuid, 'Rejected', 'DisputeManager reject on claim 3') ->> 'success')::BOOLEAN,
     TRUE,
-    '4. Staff role: disputeManager succeeds'
+    '4. Staff role: disputeManager succeeds on separate claim 3'
 );
 
-UPDATE public.return_requests SET status = 'Requested' WHERE id = '20000000-0000-0000-0000-000000000001';
+-- ----------------------------------------------------------------------------
+-- 5-13. ASSERTIONS: 9 Denied Staff Roles Rejected with 42501 on Claim 4
+-- ----------------------------------------------------------------------------
 
 -- Role 4: financeAdmin (Denied)
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000013', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Finance reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Finance reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '5. Staff role: financeAdmin is rejected with 42501'
@@ -146,7 +157,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000014', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'SellerManager reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'SellerManager reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '6. Staff role: sellerManager is rejected with 42501'
@@ -156,7 +167,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000015', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Support reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Support reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '7. Staff role: supportAdmin is rejected with 42501'
@@ -166,7 +177,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000016', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Catalog reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Catalog reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '8. Staff role: catalogManager is rejected with 42501'
@@ -176,7 +187,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000017', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Order reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Order reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '9. Staff role: orderManager is rejected with 42501'
@@ -186,7 +197,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000018', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Marketing reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Marketing reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '10. Staff role: marketingManager is rejected with 42501'
@@ -196,7 +207,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000019', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Fraud reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Fraud reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '11. Staff role: fraudAnalyst is rejected with 42501'
@@ -206,17 +217,17 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000020', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Report reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Report reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '12. Staff role: reportingAnalyst is rejected with 42501'
 );
 
--- Role 12: auditor (Denied)
+-- Role 12: auditor (Denied for returns/review)
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000021', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', 'Auditor reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Auditor reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '13. Staff role: auditor is rejected with 42501'
@@ -228,7 +239,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000001'::uuid, 'Rejected', '');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000005'::uuid, 'Rejected', '');
     $$,
     '%Rejection notes are mandatory%',
     '14. Rejection without notes is rejected with code P0005'
@@ -240,7 +251,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000003'::uuid, 'Rejected', 'Completed claim reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000006'::uuid, 'Rejected', 'Completed claim reject');
     $$,
     '%already finalized%',
     '15. Attempt to arbitrate already completed claim throws P0003 error'
@@ -252,25 +263,31 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000002'::uuid, 'Approved', 'Shipped COD approve');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000007'::uuid, 'Approved', 'Shipped COD approve');
     $$,
     '%has not been collected/delivered%',
     '16. Approval of COD claim in Shipped status throws P0006'
 );
 
 -- ----------------------------------------------------------------------------
--- 17. ASSERTION: COD + Delivered (collected) order refund succeeds
+-- 17. ASSERTION: COD + Delivered order approval succeeds and writes status 'Completed'
 -- ----------------------------------------------------------------------------
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
 
 SELECT is(
-    (public.admin_arbitrate_return_claim(
-        '20000000-0000-0000-0000-000000000004'::uuid,
-        'Approved',
-        'Valid approval for collected COD order item'
-    ) ->> 'success')::BOOLEAN,
-    TRUE,
-    '17. Approved arbitration succeeds on Delivered COD order'
+    (
+        SELECT rr.status
+        FROM (
+            SELECT public.admin_arbitrate_return_claim(
+                '20000000-0000-0000-0000-000000000008'::uuid,
+                'Approved',
+                'Valid approval for collected COD order item'
+            ) AS res
+        ) sub
+        JOIN public.return_requests rr ON rr.id = '20000000-0000-0000-0000-000000000008'
+    ),
+    'Completed',
+    '17. Approved arbitration succeeds on Delivered COD order and writes status Completed'
 );
 
 -- ----------------------------------------------------------------------------
@@ -280,13 +297,92 @@ SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
     SELECT public.admin_arbitrate_return_claim(
-        '20000000-0000-0000-0000-000000000004'::uuid,
+        '20000000-0000-0000-0000-000000000008'::uuid,
         'Approved',
         'Duplicate refund attempt'
     );
     $$,
     '%already finalized%',
     '18. Calling arbitration twice is blocked by finalized claim check'
+);
+
+-- ----------------------------------------------------------------------------
+-- 19-22. ASSERTIONS: Audit Log Security & Immutability Tests
+-- ----------------------------------------------------------------------------
+
+-- 19: Normal authenticated buyer reads 0 rows from audit_logs
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+SELECT is(
+    (SELECT count(*)::INT FROM public.audit_logs),
+    0,
+    '19. Normal user (buyer) reads 0 rows from audit_logs'
+);
+
+-- 20: Staff role without audit permission (catalogManager) reads 0 rows
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000016', true);
+SELECT is(
+    (SELECT count(*)::INT FROM public.audit_logs),
+    0,
+    '20. Staff role without audit access (catalogManager) reads 0 rows from audit_logs'
+);
+
+-- 21: Direct UPDATE on audit_logs fails for every role (trigger blocks)
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000010', true);
+    UPDATE public.audit_logs SET action = 'TAMPERED';
+    $$,
+    '%immutable and cannot be modified or deleted%',
+    '21. Direct UPDATE on audit_logs fails for all roles'
+);
+
+-- 22: Direct DELETE on audit_logs fails for every role (trigger blocks)
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000010', true);
+    DELETE FROM public.audit_logs;
+    $$,
+    '%immutable and cannot be modified or deleted%',
+    '22. Direct DELETE on audit_logs fails for all roles'
+);
+
+-- ----------------------------------------------------------------------------
+-- 23-26. ASSERTIONS: Staff Role Assignment Governance & Audit Tests
+-- ----------------------------------------------------------------------------
+
+-- 23: User cannot assign staff_role to themselves
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
+    SELECT public.admin_assign_staff_role('10000000-0000-0000-0000-000000000011'::uuid, 'disputeManager'::public.admin_staff_role);
+    $$,
+    '%Self-assignment of staff roles is prohibited%',
+    '23. User cannot assign staff_role to themselves'
+);
+
+-- 24: financeAdmin cannot assign roles (42501)
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000013', true);
+    SELECT public.admin_assign_staff_role('10000000-0000-0000-0000-000000000099'::uuid, 'supportAdmin'::public.admin_staff_role);
+    $$,
+    '%Access denied: Only Owner or Super Admin can assign staff roles%',
+    '24. financeAdmin cannot assign staff roles'
+);
+
+-- 25: superAdmin can assign roles
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
+SELECT is(
+    (public.admin_assign_staff_role('10000000-0000-0000-0000-000000000099'::uuid, 'supportAdmin'::public.admin_staff_role) ->> 'success')::BOOLEAN,
+    TRUE,
+    '25. superAdmin can successfully assign staff roles'
+);
+
+-- 26: Assignment writes an audit row
+SELECT is(
+    (SELECT count(*)::INT FROM public.audit_logs WHERE target_id = '10000000-0000-0000-0000-000000000099' AND action = 'STAFF_ROLE_ASSIGNED'),
+    1,
+    '26. Staff role assignment writes a row to public.audit_logs'
 );
 
 SELECT * FROM finish();

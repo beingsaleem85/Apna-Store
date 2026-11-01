@@ -54,8 +54,36 @@ BEGIN
 END;
 $$;
 
--- Convert public.admin_audit_logs into a backward-compatibility view
-DROP TABLE IF EXISTS public.admin_audit_logs CASCADE;
+-- Convert public.admin_audit_logs into a backward-compatibility view safely
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'admin_audit_logs'
+    ) THEN
+        INSERT INTO public.audit_logs (
+            actor_user_id,
+            actor_role,
+            action,
+            target_type,
+            target_id,
+            metadata,
+            details,
+            created_at
+        )
+        SELECT
+            COALESCE(admin_user_id, admin_id),
+            'admin'::public.app_role,
+            COALESCE(action, action_type, 'ADMIN_ACTION'),
+            COALESCE(target_type, target_entity, 'UNKNOWN'),
+            COALESCE(target_id, 'UNKNOWN'),
+            COALESCE(details, '{}'::jsonb),
+            COALESCE(details, '{}'::jsonb),
+            COALESCE(created_at, NOW())
+        FROM public.admin_audit_logs;
+
+        DROP TABLE public.admin_audit_logs CASCADE;
+    END IF;
+END $$;
 
 CREATE OR REPLACE VIEW public.admin_audit_logs AS
 SELECT
