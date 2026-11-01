@@ -1832,7 +1832,7 @@ class _BuyerDashboardState extends State<BuyerDashboard> {
                         ],
                       ),
                       SizedBox(height: 8),
-                      // Delivery / Shipping mock
+                      // Delivery / Shipping status preview
                       Row(
                         children: [
                           Icon(Icons.local_shipping, size: 16, color: Colors.green),

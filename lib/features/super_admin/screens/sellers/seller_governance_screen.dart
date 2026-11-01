@@ -593,7 +593,7 @@ class _SellerGovernanceScreenState extends State<SellerGovernanceScreen> {
               ),
               const SizedBox(height: 20),
 
-              // Mock Document Images Preview Grid
+              // Document Images Preview Grid
               Row(
                 children: [
                   Expanded(child: _buildDocPreviewCard('CNIC Front Document', Icons.badge_outlined)),

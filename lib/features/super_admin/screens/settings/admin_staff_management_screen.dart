@@ -178,7 +178,7 @@ class _AdminStaffManagementScreenState extends State<AdminStaffManagementScreen>
     ),
   ];
 
-  // Baseline demo logs
+  // Baseline initial audit logs
   final List<Map<String, dynamic>> _defaultAuditLogs = [
     {
       'id': 'LOG-94821',

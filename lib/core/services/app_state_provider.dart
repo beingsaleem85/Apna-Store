@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,7 +5,6 @@ import 'package:apna_store/core/controllers/catalog_controller.dart';
 import 'package:apna_store/core/controllers/cart_controller.dart';
 import 'package:apna_store/core/controllers/orders_controller.dart';
 import 'package:apna_store/core/controllers/seller_controller.dart';
-import 'package:apna_store/core/utils/web_helper.dart';
 import 'package:apna_store/core/services/supabase_checkout_service.dart';
 import 'package:apna_store/core/services/supabase_orders_service.dart';
 import 'package:apna_store/core/services/product_repository.dart';
@@ -391,7 +389,7 @@ class AppStateProvider extends ChangeNotifier {
     this.cartController.addListener(notifyListeners);
     this.ordersController.addListener(notifyListeners);
     this.sellerController.addListener(notifyListeners);
-    _initializeMockData();
+    _initializeLocalCache();
   }
 
   void updateDependencies({
@@ -671,7 +669,7 @@ class AppStateProvider extends ChangeNotifier {
 
 
   // 1. Initialize Cache
-  void _initializeMockData() {
+  void _initializeLocalCache() {
     loadStoresFromLocalStorage();
     loadProductsFromLocalStorage();
   }
@@ -798,14 +796,8 @@ class AppStateProvider extends ChangeNotifier {
   // SELLER PORTAL MUTATIONS & DATA CLEARING
   // ==========================================
 
-  // Clear all demo data across the app
-  void clearAllDemoData() {
-    catalogController.clearAllProducts();
-    ordersController.clearOrdersCache();
-    notifyListeners();
-  }
 
-  // Clear demo products & orders for specific seller store
+  // Clear products & orders cache for specific seller store
   void clearProductsForStore(String sellerId) {
     catalogController.clearProductsForStore(sellerId);
     ordersController.clearOrdersForSeller(sellerId);

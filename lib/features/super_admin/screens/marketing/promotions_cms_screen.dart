@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/theme/admin_theme.dart';
 import '../../core/widgets/admin_toast_dialog.dart';
 import '../../services/super_admin_provider.dart';
 
@@ -74,7 +73,6 @@ class PromotionsCmsScreen extends StatefulWidget {
 
 class _PromotionsCmsScreenState extends State<PromotionsCmsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
   final List<VoucherModel> _vouchers = [
@@ -895,7 +893,7 @@ class _PromotionsCmsScreenState extends State<PromotionsCmsScreen> with SingleTi
   }
 
   void _showBulkVoucherModal(SuperAdminProvider adminState) {
-    final prefixCtrl = TextEditingController(text: 'EID2026-');
+    final prefixCtrl = TextEditingController();
     final countCtrl = TextEditingController(text: '50');
     final discountCtrl = TextEditingController(text: '15');
 
@@ -919,7 +917,7 @@ class _PromotionsCmsScreenState extends State<PromotionsCmsScreen> with SingleTi
             TextField(
               controller: prefixCtrl,
               style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(labelText: 'Code Prefix (e.g. EID2026-)', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Code Prefix (e.g. PROMO-)', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 12),
             TextField(

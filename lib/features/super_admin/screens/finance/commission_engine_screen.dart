@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../../core/constants/app_breakpoints.dart';
-import '../../core/theme/admin_theme.dart';
 import '../../core/widgets/admin_toast_dialog.dart';
 import '../../services/super_admin_provider.dart';
 import '../../../../core/services/app_state_provider.dart';
@@ -30,8 +28,8 @@ class CommissionEngineScreen extends StatefulWidget {
 
 class _CommissionEngineScreenState extends State<CommissionEngineScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  double _globalCommissionRate = 10.0;
   String _searchQuery = '';
+  double _globalCommissionRate = 10.0;
   final TextEditingController _searchController = TextEditingController();
 
   final List<CommissionRule> _rules = [
@@ -56,7 +54,7 @@ class _CommissionEngineScreenState extends State<CommissionEngineScreen> with Si
           .from('commission_rules')
           .select()
           .order('category_name');
-      if (res is List && res.isNotEmpty && mounted) {
+      if (res.isNotEmpty && mounted) {
         setState(() {
           _rules.clear();
           for (final r in res) {
@@ -406,8 +404,8 @@ class _CommissionEngineScreenState extends State<CommissionEngineScreen> with Si
                 children: [
                   Expanded(flex: 3, child: Text('Merchant Store & Owner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
                   Expanded(flex: 2, child: Text('Assigned Rate', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
-                  Expanded(flex: 2, child: Text('Lifetime GMV', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
-                  Expanded(flex: 2, child: Text('Fee Collected', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
+                  Expanded(flex: 2, child: Text('Available Balance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
+                  Expanded(flex: 2, child: Text('Pending Payout', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
                   Expanded(child: Text('Edit Rate', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569)))),
                 ],
               ),
@@ -421,8 +419,8 @@ class _CommissionEngineScreenState extends State<CommissionEngineScreen> with Si
                   final store = stores[i];
                   final owner = store.fullName ?? store.businessName ?? 'Merchant';
                   final isCustom = store.commissionRate != 10.0;
-                  final mockGmv = (store.pendingPayout + store.lastPayout) * 1.15;
-                  final mockFee = mockGmv * (store.commissionRate / 100);
+                  final availableBalance = store.balance;
+                  final pendingPayout = store.pendingPayout;
 
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -481,16 +479,16 @@ class _CommissionEngineScreenState extends State<CommissionEngineScreen> with Si
                           ),
                         ),
 
-                        // Lifetime GMV
+                        // Available Balance
                         Expanded(
                           flex: 2,
-                          child: Text('PKR ${mockGmv.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A), fontSize: 12)),
+                          child: Text('PKR ${availableBalance.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A), fontSize: 12)),
                         ),
 
-                        // Fee collected
+                        // Pending Payout
                         Expanded(
                           flex: 2,
-                          child: Text('PKR ${mockFee.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF059669), fontSize: 12)),
+                          child: Text('PKR ${pendingPayout.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF059669), fontSize: 12)),
                         ),
 
                         // Edit Rate Button
