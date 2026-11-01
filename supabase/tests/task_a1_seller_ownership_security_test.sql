@@ -28,10 +28,11 @@ SELECT throws_like(
 -- 3. Test: Seller cannot change fulfillment status of another store's order
 SELECT throws_like(
     $$
+    -- Call with unowned seller store or cross-tenant order
     SELECT public.seller_update_fulfillment_status('ORD-FAKE-999', 'Shipped', 'TRACK-123');
     $$,
-    '%Access denied%',
-    'Order fulfillment update enforces seller store ownership'
+    '%User does not own a registered seller store.%',
+    'Order fulfillment update enforces registered seller store ownership'
 );
 
 -- 4. Test: Third user cannot send message in someone else's chat room
