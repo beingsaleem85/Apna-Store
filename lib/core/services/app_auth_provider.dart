@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../config/app_config.dart';
 import '../errors/failures.dart';
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
@@ -40,12 +39,16 @@ class AppAuthProvider extends ChangeNotifier {
   void _initializeAuth() {
     try {
       final currentSession = _supabase.auth.currentSession;
-      if (currentSession != null && currentSession.user != null) {
+      if (currentSession != null) {
         _currentUser = currentSession.user;
         _isEmailVerified = currentSession.user.emailConfirmedAt != null;
-        _status = AuthStatus.authenticated;
-        _fetchRoleFromDatabase(currentSession.user.id).then((_) {
-          notifyListeners();
+        _checkDeactivationStatus(currentSession.user.id).then((isDeactivated) {
+          if (!isDeactivated) {
+            _status = AuthStatus.authenticated;
+            _fetchRoleFromDatabase(currentSession.user.id).then((_) {
+              notifyListeners();
+            });
+          }
         });
       } else {
         _status = AuthStatus.unauthenticated;
@@ -53,7 +56,9 @@ class AppAuthProvider extends ChangeNotifier {
 
       _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
         final session = data.session;
-        if (session != null && session.user != null) {
+        if (session != null) {
+          final isDeactivated = await _checkDeactivationStatus(session.user.id);
+          if (isDeactivated) return;
           _currentUser = session.user;
           _isEmailVerified = session.user.emailConfirmedAt != null;
           await _fetchRoleFromDatabase(session.user.id);
@@ -69,6 +74,27 @@ class AppAuthProvider extends ChangeNotifier {
     } catch (_) {
       _status = AuthStatus.unauthenticated;
     }
+  }
+
+  /// Verifies account active status against `profiles.is_deactivated`.
+  /// If soft-deactivated, immediately revokes active session and records explanatory error.
+  Future<bool> _checkDeactivationStatus(String userId) async {
+    try {
+      final res = await _supabase
+          .from('profiles')
+          .select('is_deactivated')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (res != null && res['is_deactivated'] == true) {
+        _errorMessage = 'Your account has been deactivated. Please contact customer support.';
+        await signOut();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error checking deactivation status: $e');
+    }
+    return false;
   }
 
   /// Loads canonical role strictly from protected `public.user_roles` database table.
@@ -117,6 +143,11 @@ class AppAuthProvider extends ChangeNotifier {
         throw const AuthenticationFailure(message: 'Authentication failed. Please check your credentials.');
       }
 
+      final isDeactivated = await _checkDeactivationStatus(user.id);
+      if (isDeactivated) {
+        throw const AuthenticationFailure(message: 'Your account has been deactivated. Please contact customer support.');
+      }
+
       _currentUser = user;
       _isEmailVerified = user.emailConfirmedAt != null;
       await _fetchRoleFromDatabase(user.id);
@@ -125,7 +156,7 @@ class AppAuthProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return _currentRole;
-    } catch (e, st) {
+    } catch (e) {
       _isLoading = false;
       _status = AuthStatus.unauthenticated;
       _currentUser = null;
@@ -179,7 +210,7 @@ class AppAuthProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return true;
-    } catch (e, st) {
+    } catch (e) {
       _isLoading = false;
       notifyListeners();
       // Always return true to caller to prevent account enumeration
