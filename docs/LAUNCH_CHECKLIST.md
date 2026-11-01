@@ -10,7 +10,11 @@
 - [ ] **Daily Backups & PITR:** Enable Point-in-Time Recovery (PITR) in Supabase Dashboard (Database -> Backups).
 - [ ] **First Super Admin Bootstrap:** Run `INSERT INTO public.user_roles (user_id, role) VALUES ('<SUPER_ADMIN_AUTH_UID>', 'owner');` via Supabase SQL Editor.
 - [ ] **Required Database Extensions (`pg_cron`, `pg_net`):**
-  Ensure extensions are enabled in Supabase Dashboard (Database -> Extensions) or via SQL Editor:
+  Ensure extensions are enabled in Supabase Dashboard:
+  1. Open Supabase Dashboard -> **Database** -> **Extensions**.
+  2. Search for `pg_cron` and click toggle to **Enable** (installs cron into `cron` schema).
+  3. Search for `pg_net` and click toggle to **Enable**.
+  Or run via Supabase SQL Editor (requires superuser/postgres role):
   ```sql
   CREATE EXTENSION IF NOT EXISTS pg_cron;
   CREATE EXTENSION IF NOT EXISTS pg_net;

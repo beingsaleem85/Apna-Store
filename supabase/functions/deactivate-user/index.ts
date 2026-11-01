@@ -4,11 +4,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Content-Type': 'application/json',
 };
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(JSON.stringify({ status: 'ok' }), { headers: corsHeaders });
   }
 
   try {
@@ -16,7 +17,7 @@ serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: corsHeaders,
       });
     }
 
@@ -33,7 +34,7 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized: Invalid caller session' }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: corsHeaders,
       });
     }
 
@@ -43,7 +44,7 @@ serve(async (req) => {
     if (!user_id) {
       return new Response(JSON.stringify({ error: 'Missing required user_id parameter' }), {
         status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: corsHeaders,
       });
     }
 
@@ -59,7 +60,7 @@ serve(async (req) => {
       if (rpcError) {
         return new Response(JSON.stringify({ error: rpcError.message }), {
           status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: corsHeaders,
         });
       }
       rpcData = data;
@@ -72,7 +73,7 @@ serve(async (req) => {
       if (rpcError) {
         return new Response(JSON.stringify({ error: rpcError.message }), {
           status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: corsHeaders,
         });
       }
       rpcData = data;
@@ -85,13 +86,25 @@ serve(async (req) => {
     });
 
     if (adminError) {
+      // Revert database state through matching RPC so DB and auth never disagree
+      if (isBan) {
+        await supabaseClient.rpc('admin_reactivate_user_account', {
+          p_user_id: user_id,
+          p_reason: 'Automatic rollback: Auth ban sync failed (' + adminError.message + ')',
+        });
+      } else {
+        await supabaseClient.rpc('deactivate_user_account', {
+          p_user_id: user_id,
+          p_reason: 'Automatic rollback: Auth unban sync failed (' + adminError.message + ')',
+        });
+      }
+
       return new Response(JSON.stringify({
-        warning: 'Database account status updated, but auth ban sync failed.',
-        admin_error: adminError.message,
-        rpcData,
+        error: 'Failed to synchronize authentication service ban state. Database state was safely rolled back.',
+        details: adminError.message,
       }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 502,
+        headers: corsHeaders,
       });
     }
 
@@ -102,12 +115,12 @@ serve(async (req) => {
       rpcData,
     }), {
       status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: corsHeaders,
     });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message ?? 'Internal Server Error' }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: corsHeaders,
     });
   }
 });
