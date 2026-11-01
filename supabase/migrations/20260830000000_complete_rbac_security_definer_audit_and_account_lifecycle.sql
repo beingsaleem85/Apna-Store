@@ -129,6 +129,9 @@ END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '';
 
 -- A. admin_review_seller_store
+DROP FUNCTION IF EXISTS public.admin_review_seller_store(UUID, BOOLEAN, NUMERIC);
+DROP FUNCTION IF EXISTS public.admin_review_seller_store(UUID, BOOLEAN, NUMERIC(5,2));
+DROP FUNCTION IF EXISTS public.admin_review_seller_store(UUID, BOOLEAN);
 CREATE OR REPLACE FUNCTION public.admin_review_seller_store(
     store_id UUID,
     approved BOOLEAN,
@@ -156,6 +159,8 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- B. admin_review_kyc_document
+DROP FUNCTION IF EXISTS public.admin_review_kyc_document(UUID, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_review_kyc_document(UUID, TEXT);
 CREATE OR REPLACE FUNCTION public.admin_review_kyc_document(
     doc_id UUID,
     new_status TEXT,
@@ -184,18 +189,35 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- C. admin_review_product
+DROP FUNCTION IF EXISTS public.admin_review_product(UUID, BOOLEAN, TEXT);
+DROP FUNCTION IF EXISTS public.admin_review_product(UUID, BOOLEAN);
 CREATE OR REPLACE FUNCTION public.admin_review_product(
     prod_id UUID,
-    approved BOOLEAN
+    approved BOOLEAN,
+    rejection_reason TEXT DEFAULT NULL
 )
-RETURNS VOID AS $$
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_store_id UUID;
 BEGIN
     IF NOT (public.has_permission('products', 'approve') OR public.has_permission('products', 'moderate')) THEN
         RAISE EXCEPTION 'Access denied: Insufficient privileges to review products.' USING ERRCODE = '42501';
     END IF;
 
+    SELECT seller_store_id INTO v_store_id
+    FROM public.products
+    WHERE id = prod_id;
+
+    IF v_store_id IS NOT NULL AND public.owns_seller_store(v_store_id) THEN
+        RAISE EXCEPTION 'Sellers cannot approve their own products.' USING ERRCODE = '42501';
+    END IF;
+
+    IF NOT approved AND trim(COALESCE(rejection_reason, '')) = '' THEN
+        RAISE EXCEPTION 'Product rejection requires a non-empty reason.';
+    END IF;
+
     UPDATE public.products
-    SET approval_status = CASE WHEN approved THEN 'approved' ELSE 'rejected' END,
+    SET approval_status = CASE WHEN approved THEN 'Approved' ELSE 'Rejected' END,
         is_active = approved,
         updated_at = NOW()
     WHERE id = prod_id;
@@ -203,53 +225,93 @@ BEGIN
     PERFORM public.internal_record_audit_log(
         'products',
         prod_id::TEXT,
-        CASE WHEN approved THEN 'PRODUCT_APPROVED' ELSE 'PRODUCT_REJECTED' END,
-        '{}'::jsonb
+        'REVIEW_PRODUCT',
+        jsonb_build_object('approval_status', CASE WHEN approved THEN 'Approved' ELSE 'Rejected' END, 'rejection_reason', rejection_reason)
     );
+
+    RETURN TRUE;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+GRANT EXECUTE ON FUNCTION public.admin_review_product(UUID, BOOLEAN, TEXT) TO authenticated;
 
 -- D. admin_adjust_seller_wallet
+DROP FUNCTION IF EXISTS public.admin_adjust_seller_wallet(UUID, NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS public.admin_adjust_seller_wallet(UUID, NUMERIC, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_adjust_seller_wallet(UUID, NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS public.admin_adjust_seller_wallet(UUID, NUMERIC, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_adjust_seller_wallet(UUID, NUMERIC(12,2), TEXT);
+DROP FUNCTION IF EXISTS public.admin_adjust_seller_wallet(UUID, NUMERIC(12,2), TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.admin_adjust_seller_wallet(
     p_store_id UUID,
-    p_amount NUMERIC(12,2),
-    p_reason TEXT
+    p_amount NUMERIC,
+    p_reason TEXT,
+    p_idempotency_key TEXT DEFAULT NULL
 )
 RETURNS JSONB AS $$
 DECLARE
     v_account_id UUID;
     v_tx_id UUID;
+    v_owner_id UUID;
+    v_effective_idempotency_key TEXT;
 BEGIN
     IF NOT public.has_permission('finance', 'adjust') THEN
         RAISE EXCEPTION 'Access denied: Insufficient privileges to adjust seller wallets.' USING ERRCODE = '42501';
     END IF;
 
+    IF p_amount IS NULL OR p_amount = 0.00 THEN
+        RAISE EXCEPTION 'Adjustment amount cannot be zero or null.' USING ERRCODE = '22023';
+    END IF;
+
+    IF p_reason IS NULL OR trim(p_reason) = '' THEN
+        RAISE EXCEPTION 'Adjustment reason is required for financial audit.' USING ERRCODE = '22023';
+    END IF;
+
     SELECT id INTO v_account_id FROM public.wallet_accounts WHERE seller_store_id = p_store_id;
     IF v_account_id IS NULL THEN
-        RAISE EXCEPTION 'Wallet account not found.' USING ERRCODE = 'P0002';
+        SELECT owner_id INTO v_owner_id FROM public.seller_stores WHERE id = p_store_id;
+        IF v_owner_id IS NOT NULL THEN
+            INSERT INTO public.wallet_accounts (seller_store_id, owner_id)
+            VALUES (p_store_id, v_owner_id)
+            ON CONFLICT (seller_store_id) DO UPDATE SET updated_at = NOW()
+            RETURNING id INTO v_account_id;
+        ELSE
+            RAISE EXCEPTION 'Wallet account not found.' USING ERRCODE = 'P0002';
+        END IF;
     END IF;
+
+    v_effective_idempotency_key := COALESCE(p_idempotency_key, 'ADJ-' || gen_random_uuid()::TEXT);
 
     INSERT INTO public.wallet_transactions (
         wallet_account_id, seller_store_id, transaction_type, amount,
         source_type, source_id, idempotency_key, description, created_by
     ) VALUES (
         v_account_id, p_store_id, 'ADJUSTMENT', p_amount,
-        'ADMIN_ADJUSTMENT', gen_random_uuid()::TEXT, 'ADJ-' || gen_random_uuid()::TEXT,
+        'ADMIN_ADJUSTMENT', gen_random_uuid()::TEXT, v_effective_idempotency_key,
         p_reason, auth.uid()
-    ) RETURNING id INTO v_tx_id;
+    )
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id INTO v_tx_id;
 
-    PERFORM public.internal_record_audit_log(
-        'wallet_accounts',
-        v_account_id::TEXT,
-        'WALLET_ADJUSTMENT',
-        jsonb_build_object('amount', p_amount, 'reason', p_reason, 'transaction_id', v_tx_id)
-    );
+    IF v_tx_id IS NULL THEN
+        SELECT id INTO v_tx_id FROM public.wallet_transactions WHERE idempotency_key = v_effective_idempotency_key;
+    ELSE
+        PERFORM public.internal_record_audit_log(
+            'seller_stores',
+            p_store_id::TEXT,
+            'ADJUST_SELLER_WALLET',
+            jsonb_build_object('amount', p_amount, 'reason', p_reason, 'transaction_id', v_tx_id)
+        );
+    END IF;
 
     RETURN jsonb_build_object('success', TRUE, 'transaction_id', v_tx_id);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
+GRANT EXECUTE ON FUNCTION public.admin_adjust_seller_wallet(UUID, NUMERIC, TEXT, TEXT) TO authenticated;
+
 -- E. admin_toggle_seller_suspension
+DROP FUNCTION IF EXISTS public.admin_toggle_seller_suspension(UUID, BOOLEAN);
+DROP FUNCTION IF EXISTS public.admin_toggle_seller_suspension(UUID, BOOLEAN, TEXT);
 CREATE OR REPLACE FUNCTION public.admin_toggle_seller_suspension(
     p_store_id UUID,
     p_suspended BOOLEAN,
@@ -278,6 +340,8 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- F. admin_toggle_payout_lock
+DROP FUNCTION IF EXISTS public.admin_toggle_payout_lock(UUID, BOOLEAN);
+DROP FUNCTION IF EXISTS public.admin_toggle_payout_lock(UUID, BOOLEAN, TEXT);
 CREATE OR REPLACE FUNCTION public.admin_toggle_payout_lock(
     p_store_id UUID,
     p_locked BOOLEAN,
@@ -306,36 +370,141 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- G. admin_process_payout
+DROP FUNCTION IF EXISTS public.admin_process_payout(UUID, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_process_payout(UUID, TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.admin_process_payout(
     p_payout_id UUID,
-    p_decision TEXT, -- 'Approved' or 'Rejected'
+    p_action TEXT,
     p_notes TEXT DEFAULT NULL
 )
 RETURNS JSONB AS $$
+DECLARE
+    v_admin_id UUID;
+    v_store_id UUID;
+    v_requested_by UUID;
+    v_amount NUMERIC(12,2);
+    v_current_status TEXT;
+    v_wallet_account_id UUID;
+    v_result JSONB;
 BEGIN
-    IF NOT public.has_permission('payouts', 'approve') THEN
-        RAISE EXCEPTION 'Access denied: Insufficient privileges to approve payouts.' USING ERRCODE = '42501';
+    v_admin_id := auth.uid();
+    IF v_admin_id IS NULL OR NOT (public.is_admin() OR public.has_permission('payouts', 'hold') OR public.has_permission('payouts', 'approve')) THEN
+        RAISE EXCEPTION 'Access denied: Insufficient privileges for payout processing.' USING ERRCODE = '42501';
     END IF;
 
-    UPDATE public.seller_payout_requests
-    SET status = p_decision,
-        admin_notes = p_notes,
-        processed_at = NOW(),
-        processed_by = auth.uid()
-    WHERE id = p_payout_id;
+    -- Lock Payout Request Row
+    SELECT seller_store_id, requested_by, amount, status INTO v_store_id, v_requested_by, v_amount, v_current_status
+    FROM public.payout_requests
+    WHERE id = p_payout_id FOR UPDATE;
 
-    PERFORM public.internal_record_audit_log(
-        'seller_payout_requests',
-        p_payout_id::TEXT,
-        'PAYOUT_PROCESSED',
-        jsonb_build_object('decision', p_decision, 'notes', p_notes)
-    );
+    IF v_store_id IS NULL THEN
+        RAISE EXCEPTION 'Payout request % not found.', p_payout_id;
+    END IF;
 
-    RETURN jsonb_build_object('success', TRUE, 'payout_id', p_payout_id, 'status', p_decision);
+    -- Prevent self-approval if admin is also store owner
+    IF v_requested_by = v_admin_id THEN
+        RAISE EXCEPTION 'Access denied: Admin cannot approve or process own payout request.' USING ERRCODE = '42501';
+    END IF;
+
+    SELECT id INTO v_wallet_account_id FROM public.wallet_accounts WHERE seller_store_id = v_store_id;
+
+    IF p_action = 'Approve' THEN
+        IF v_current_status <> 'Requested' THEN
+            RAISE EXCEPTION 'Cannot approve payout in status %.', v_current_status;
+        END IF;
+
+        UPDATE public.payout_requests
+        SET status = 'Approved', admin_notes = p_notes, processed_by = v_admin_id, updated_at = NOW()
+        WHERE id = p_payout_id;
+
+        PERFORM public.internal_record_audit_log(
+            'payout_requests',
+            p_payout_id::TEXT,
+            'PAYOUT_APPROVED',
+            jsonb_build_object('amount', v_amount, 'notes', p_notes)
+        );
+
+        RETURN jsonb_build_object('success', TRUE, 'status', 'Approved', 'payout_id', p_payout_id);
+
+    ELSIF p_action IN ('Process', 'Pay') THEN
+        IF v_current_status IN ('Paid', 'Failed') THEN
+            RETURN jsonb_build_object('success', TRUE, 'status', v_current_status, 'already_processed', TRUE, 'payout_id', p_payout_id);
+        END IF;
+
+        -- Release HOLD and Insert DEBIT Transaction (Idempotent execution)
+        INSERT INTO public.wallet_transactions (
+            wallet_account_id, seller_store_id, transaction_type, amount,
+            source_type, source_id, idempotency_key, description, created_by
+        ) VALUES (
+            v_wallet_account_id, v_store_id, 'RELEASE', v_amount,
+            'PAYOUT_DISBURSEMENT', p_payout_id::text, 'WLT-REL-' || p_payout_id::text,
+            'Release Hold for Payout Disbursement ' || p_payout_id::text, v_admin_id
+        ) ON CONFLICT (idempotency_key) DO NOTHING;
+
+        INSERT INTO public.wallet_transactions (
+            wallet_account_id, seller_store_id, transaction_type, amount,
+            source_type, source_id, idempotency_key, description, created_by
+        ) VALUES (
+            v_wallet_account_id, v_store_id, 'DEBIT', v_amount,
+            'PAYOUT_DISBURSEMENT', p_payout_id::text, 'WLT-DEB-' || p_payout_id::text,
+            'Manual Bank Payout Disbursement for Request ' || p_payout_id::text, v_admin_id
+        ) ON CONFLICT (idempotency_key) DO NOTHING;
+
+        UPDATE public.payout_requests
+        SET status = 'Paid', admin_notes = p_notes, processed_by = v_admin_id, processed_at = NOW(), updated_at = NOW()
+        WHERE id = p_payout_id;
+
+        UPDATE public.seller_stores
+        SET last_payout = v_amount,
+            updated_at = NOW()
+        WHERE id = v_store_id;
+
+        PERFORM public.internal_record_audit_log(
+            'payout_requests',
+            p_payout_id::TEXT,
+            'PAYOUT_DISBURSED',
+            jsonb_build_object('amount', v_amount, 'notes', p_notes)
+        );
+
+        RETURN jsonb_build_object('success', TRUE, 'status', 'Paid', 'already_processed', FALSE, 'payout_id', p_payout_id);
+
+    ELSIF p_action = 'Reject' THEN
+        IF v_current_status = 'Paid' THEN
+            RAISE EXCEPTION 'Cannot reject an already paid payout.';
+        END IF;
+
+        -- Release HOLD Entry back to Seller Available Balance
+        INSERT INTO public.wallet_transactions (
+            wallet_account_id, seller_store_id, transaction_type, amount,
+            source_type, source_id, idempotency_key, description, created_by
+        ) VALUES (
+            v_wallet_account_id, v_store_id, 'RELEASE', v_amount,
+            'PAYOUT_REJECTION_RELEASE', p_payout_id::text, 'WLT-REJ-REL-' || p_payout_id::text,
+            'Release Hold for Rejected Payout ' || p_payout_id::text, v_admin_id
+        ) ON CONFLICT (idempotency_key) DO NOTHING;
+
+        UPDATE public.payout_requests
+        SET status = 'Rejected', admin_notes = p_notes, processed_by = v_admin_id, processed_at = NOW(), updated_at = NOW()
+        WHERE id = p_payout_id;
+
+        PERFORM public.internal_record_audit_log(
+            'payout_requests',
+            p_payout_id::TEXT,
+            'PAYOUT_REJECTED',
+            jsonb_build_object('amount', v_amount, 'notes', p_notes)
+        );
+
+        RETURN jsonb_build_object('success', TRUE, 'status', 'Rejected', 'payout_id', p_payout_id);
+    END IF;
+
+    RETURN jsonb_build_object('success', FALSE, 'error', 'Invalid action');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- H. admin_create_voucher and admin_toggle_voucher_active
+DROP FUNCTION IF EXISTS public.admin_create_voucher(TEXT, TEXT, NUMERIC, NUMERIC, NUMERIC, TIMESTAMPTZ, TIMESTAMPTZ, INT, INT);
+DROP FUNCTION IF EXISTS public.admin_create_voucher(TEXT, TEXT, NUMERIC, NUMERIC, NUMERIC, TIMESTAMPTZ, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.admin_create_voucher(TEXT, TEXT, NUMERIC(12,2), NUMERIC(12,2), NUMERIC(12,2), TIMESTAMPTZ, TIMESTAMPTZ);
 CREATE OR REPLACE FUNCTION public.admin_create_voucher(
     p_code TEXT,
     p_discount_type TEXT,
@@ -399,6 +568,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- I. admin_update_commission_rule
+DROP FUNCTION IF EXISTS public.admin_update_commission_rule(TEXT, NUMERIC, NUMERIC);
+DROP FUNCTION IF EXISTS public.admin_update_commission_rule(UUID, NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS public.admin_update_commission_rule(UUID, NUMERIC(5,2), TEXT);
 CREATE OR REPLACE FUNCTION public.admin_update_commission_rule(
     p_rule_id UUID,
     p_base_rate NUMERIC(5,2),
@@ -426,7 +598,44 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
+CREATE OR REPLACE FUNCTION public.admin_update_commission_rule(
+    p_category_name TEXT,
+    p_percentage NUMERIC,
+    p_fixed_fee NUMERIC DEFAULT 0
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_rule_id UUID;
+BEGIN
+    IF NOT public.has_permission('commission', 'edit') THEN
+        RAISE EXCEPTION 'Access denied: Insufficient privileges to update commission rules.' USING ERRCODE = '42501';
+    END IF;
+
+    UPDATE public.commission_rules
+    SET base_rate = p_percentage,
+        updated_at = NOW()
+    WHERE category_name = p_category_name
+    RETURNING id INTO v_rule_id;
+
+    PERFORM public.internal_record_audit_log(
+        'commission_rules',
+        COALESCE(v_rule_id::TEXT, p_category_name),
+        'COMMISSION_RULE_UPDATED',
+        jsonb_build_object('base_rate', p_percentage, 'category_name', p_category_name)
+    );
+
+    RETURN jsonb_build_object('success', TRUE, 'category_name', p_category_name);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_update_commission_rule(TEXT, NUMERIC, NUMERIC) TO authenticated;
+
 -- J. admin_broadcast_notification
+DROP FUNCTION IF EXISTS public.admin_broadcast_notification(TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_broadcast_notification(TEXT, TEXT, public.app_role);
 CREATE OR REPLACE FUNCTION public.admin_broadcast_notification(
     p_title TEXT,
     p_body TEXT,
@@ -458,6 +667,26 @@ BEGIN
     RETURN jsonb_build_object('success', TRUE, 'delivered_count', v_count);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+
+CREATE OR REPLACE FUNCTION public.admin_broadcast_notification(
+    p_title TEXT,
+    p_body TEXT,
+    p_target_role TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    RETURN public.admin_broadcast_notification(
+        p_title => p_title,
+        p_body => p_body,
+        p_target_role => CASE WHEN p_target_role IS NULL OR p_target_role = '' OR p_target_role = 'all' THEN NULL ELSE p_target_role::public.app_role END
+    );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_broadcast_notification(TEXT, TEXT, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 3. STAFF ROLE PERMISSIONS SEEDING (ENSURING FULL MODULE COVERAGE)
@@ -552,9 +781,14 @@ GRANT EXECUTE ON FUNCTION public.deactivate_user_account(UUID, TEXT) TO authenti
 -- ----------------------------------------------------------------------------
 
 -- F3. seller_update_fulfillment_status: Explicit ownership check & error message
+DROP FUNCTION IF EXISTS public.seller_update_fulfillment_status(TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.seller_update_fulfillment_status(
     p_order_id TEXT,
     p_new_status TEXT,
+    p_seller_store_id UUID DEFAULT NULL,
+    p_courier_name TEXT DEFAULT NULL,
+    p_tracking_number TEXT DEFAULT NULL,
     p_notes TEXT DEFAULT NULL
 )
 RETURNS JSONB
@@ -565,19 +799,28 @@ AS $$
 DECLARE
     v_order RECORD;
     v_seller_store RECORD;
+    v_target_store_id UUID;
     v_current_user_id UUID := auth.uid();
 BEGIN
     IF v_current_user_id IS NULL THEN
         RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
     END IF;
 
-    SELECT id, is_approved INTO v_seller_store
-    FROM public.seller_stores
-    WHERE owner_id = v_current_user_id;
+    IF p_seller_store_id IS NOT NULL THEN
+        SELECT id, is_approved INTO v_seller_store
+        FROM public.seller_stores
+        WHERE id = p_seller_store_id AND owner_id = v_current_user_id;
+    ELSE
+        SELECT id, is_approved INTO v_seller_store
+        FROM public.seller_stores
+        WHERE owner_id = v_current_user_id;
+    END IF;
 
-    IF NOT FOUND THEN
+    IF v_seller_store.id IS NULL THEN
         RAISE EXCEPTION 'User does not own a registered seller store.' USING ERRCODE = '42501';
     END IF;
+
+    v_target_store_id := v_seller_store.id;
 
     SELECT id, order_number, status, seller_store_id
     INTO v_order
@@ -590,8 +833,10 @@ BEGIN
     END IF;
 
     -- Strict Store Ownership Validation
-    IF v_order.seller_store_id != v_seller_store.id THEN
-        RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store.' USING ERRCODE = '42501';
+    IF v_order.seller_store_id IS NOT NULL AND v_order.seller_store_id != v_target_store_id THEN
+        IF NOT EXISTS (SELECT 1 FROM public.order_items WHERE order_id = p_order_id AND seller_store_id = v_target_store_id) THEN
+            RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store.' USING ERRCODE = '42501';
+        END IF;
     END IF;
 
     -- State machine forward transitions
@@ -613,6 +858,8 @@ BEGIN
     RETURN jsonb_build_object('success', TRUE, 'order_id', p_order_id, 'status', p_new_status);
 END;
 $$;
+
+GRANT EXECUTE ON FUNCTION public.seller_update_fulfillment_status(TEXT, TEXT, UUID, TEXT, TEXT, TEXT) TO authenticated;
 
 -- F4. admin_process_refund: Check permissions & revoke direct EXECUTE from authenticated
 CREATE OR REPLACE FUNCTION public.admin_process_refund(
@@ -693,7 +940,7 @@ BEGIN
 
     IF v_existing_refund_id IS NOT NULL THEN
         IF v_existing_order_id <> p_order_id OR v_existing_item_id <> p_order_item_id OR v_existing_amount <> p_amount THEN
-            RAISE EXCEPTION 'Idempotency conflict: Existing refund has different parameters.' USING ERRCODE = 'P0003';
+            RAISE EXCEPTION 'Idempotency conflict: Existing refund % has different request parameters.', p_idempotency_key USING ERRCODE = 'P0001';
         END IF;
 
         RETURN jsonb_build_object(
@@ -722,7 +969,7 @@ BEGIN
     WHERE order_item_id = p_order_item_id AND status = 'Completed';
 
     IF (v_existing_refunded + p_amount) > v_item_total THEN
-        RAISE EXCEPTION 'Refund amount exceeds eligible paid item amount.' USING ERRCODE = 'P0004';
+        RAISE EXCEPTION 'Refund amount exceeds eligible paid item amount. Eligible: %, Requested: %', (v_item_total - v_existing_refunded)::NUMERIC(12,2), p_amount::NUMERIC(12,2) USING ERRCODE = 'P0001';
     END IF;
 
     v_comm_reversed := ROUND(p_amount * (v_item_commission_rate / 100.00), 2);
@@ -767,8 +1014,7 @@ BEGIN
 END;
 $$;
 
--- Revoke direct execution of admin_process_refund from authenticated users
-REVOKE ALL ON FUNCTION public.admin_process_refund(TEXT, UUID, NUMERIC, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_process_refund(TEXT, UUID, NUMERIC, TEXT, TEXT) TO authenticated;
 
 -- F5. chat_messages length CHECK, rate limit in send_chat_message, direct DML revoked
 ALTER TABLE public.chat_messages

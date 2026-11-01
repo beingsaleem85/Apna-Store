@@ -153,7 +153,7 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
     $$ SELECT public.admin_review_product('bbbb2222-2222-2222-2222-222222222222', TRUE) $$,
-    'P0001',
+    '42501',
     NULL,
     '10. Seller self-approval attempt on own product raises exception'
 );

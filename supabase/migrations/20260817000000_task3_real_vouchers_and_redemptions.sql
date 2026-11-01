@@ -23,12 +23,52 @@ CREATE TABLE IF NOT EXISTS public.vouchers (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 1b. Create platform_vouchers table
+CREATE TABLE IF NOT EXISTS public.platform_vouchers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code TEXT UNIQUE NOT NULL,
+    discount_type TEXT NOT NULL DEFAULT 'percentage',
+    discount_value NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (discount_value >= 0.00),
+    min_order_amount NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (min_order_amount >= 0.00),
+    max_discount NUMERIC(12,2),
+    start_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    end_date TIMESTAMPTZ,
+    valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    valid_until TIMESTAMPTZ,
+    usage_limit INT,
+    times_used INT NOT NULL DEFAULT 0 CHECK (times_used >= 0),
+    per_user_limit INT NOT NULL DEFAULT 1 CHECK (per_user_limit > 0),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by UUID REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION public.sync_platform_voucher_dates()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.start_date := COALESCE(NEW.start_date, NEW.valid_from, NOW());
+    NEW.valid_from := NEW.start_date;
+    NEW.end_date := COALESCE(NEW.end_date, NEW.valid_until);
+    NEW.valid_until := NEW.end_date;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_platform_voucher_dates ON public.platform_vouchers;
+CREATE TRIGGER trg_sync_platform_voucher_dates
+    BEFORE INSERT OR UPDATE ON public.platform_vouchers
+    FOR EACH ROW EXECUTE FUNCTION public.sync_platform_voucher_dates();
+
+ALTER TABLE public.platform_vouchers ENABLE ROW LEVEL SECURITY;
+GRANT SELECT ON public.platform_vouchers TO authenticated;
+
 -- 2. Create voucher_redemptions table
 CREATE TABLE IF NOT EXISTS public.voucher_redemptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     voucher_id UUID NOT NULL REFERENCES public.vouchers(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    order_id UUID REFERENCES public.buyer_orders(id) ON DELETE SET NULL,
+    order_id TEXT REFERENCES public.buyer_orders(id) ON DELETE SET NULL,
     discount_applied NUMERIC(12,2) NOT NULL CHECK (discount_applied >= 0.00),
     redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -175,7 +215,7 @@ SET search_path = ''
 AS $$
 DECLARE
     v_buyer_id UUID;
-    v_order_id UUID;
+    v_order_id TEXT;
     v_order_number TEXT;
     v_normalized_payment_method TEXT;
     v_total_amount NUMERIC(12,2) := 0;
@@ -422,27 +462,8 @@ REVOKE ALL ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT
 REVOKE ALL ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT, TEXT) FROM anon;
 GRANT EXECUTE ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 
--- Also provide 5-arg overload for backwards compatibility
-CREATE OR REPLACE FUNCTION public.create_atomic_order(
-    p_items JSONB,
-    p_shipping_address JSONB,
-    p_payment_method TEXT,
-    p_idempotency_key TEXT,
-    p_notes TEXT DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = ''
-AS $$
-BEGIN
-    RETURN public.create_atomic_order(p_items, p_shipping_address, p_payment_method, p_idempotency_key, p_notes, NULL);
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT) FROM anon;
-GRANT EXECUTE ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT) TO authenticated;
+-- Ensure no conflicting 5-arg overload exists with overlapping defaults
+DROP FUNCTION IF EXISTS public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT);
 
 -- 10. Admin Voucher RPCs
 CREATE OR REPLACE FUNCTION public.admin_create_voucher(

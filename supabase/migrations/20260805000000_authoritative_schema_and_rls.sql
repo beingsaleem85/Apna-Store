@@ -62,8 +62,62 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 ALTER TABLE public.profiles
     ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS phone_number TEXT DEFAULT '',
     ADD COLUMN IF NOT EXISTS mobile_number TEXT DEFAULT '',
     ADD COLUMN IF NOT EXISTS avatar_url TEXT DEFAULT '';
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'role'
+    ) THEN
+        ALTER TABLE public.profiles ALTER COLUMN role DROP DEFAULT;
+        ALTER TABLE public.profiles ALTER COLUMN role TYPE public.app_role USING role::text::public.app_role;
+        ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'buyer'::public.app_role;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_cast 
+        WHERE castsource = 'public.app_role'::regtype AND casttarget = 'public.user_role'::regtype
+    ) THEN
+        CREATE CAST (public.app_role AS public.user_role) WITH INOUT AS IMPLICIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_cast 
+        WHERE castsource = 'public.user_role'::regtype AND casttarget = 'public.app_role'::regtype
+    ) THEN
+        CREATE CAST (public.user_role AS public.app_role) WITH INOUT AS IMPLICIT;
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.sync_profile_phone_fields()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.phone IS NOT NULL AND NEW.phone <> '' THEN
+        NEW.mobile_number := COALESCE(NULLIF(NEW.mobile_number, ''), NEW.phone);
+        NEW.phone_number := COALESCE(NULLIF(NEW.phone_number, ''), NEW.phone);
+    ELSIF NEW.mobile_number IS NOT NULL AND NEW.mobile_number <> '' THEN
+        NEW.phone := NEW.mobile_number;
+        NEW.phone_number := COALESCE(NULLIF(NEW.phone_number, ''), NEW.mobile_number);
+    ELSIF NEW.phone_number IS NOT NULL AND NEW.phone_number <> '' THEN
+        NEW.phone := NEW.phone_number;
+        NEW.mobile_number := COALESCE(NULLIF(NEW.mobile_number, ''), NEW.phone_number);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_profile_phone ON public.profiles;
+CREATE TRIGGER trg_sync_profile_phone
+BEFORE INSERT OR UPDATE ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.sync_profile_phone_fields();
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
@@ -132,6 +186,25 @@ CREATE TABLE IF NOT EXISTS public.seller_stores (
 
 ALTER TABLE public.seller_stores ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.seller_stores ADD COLUMN IF NOT EXISTS name TEXT;
+
+CREATE OR REPLACE FUNCTION public.sync_seller_store_name()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.name IS NOT NULL AND NEW.name <> '' AND (NEW.shop_name IS NULL OR NEW.shop_name = '') THEN
+        NEW.shop_name := NEW.name;
+    ELSIF NEW.shop_name IS NOT NULL AND NEW.shop_name <> '' AND (NEW.name IS NULL OR NEW.name = '') THEN
+        NEW.name := NEW.shop_name;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_seller_store_name ON public.seller_stores;
+CREATE TRIGGER trg_sync_seller_store_name
+BEFORE INSERT OR UPDATE ON public.seller_stores
+FOR EACH ROW EXECUTE FUNCTION public.sync_seller_store_name();
+
 -- B. seller_kyc_documents (Single Canonical Table)
 CREATE TABLE IF NOT EXISTS public.seller_kyc_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -187,6 +260,44 @@ CREATE TABLE IF NOT EXISTS public.products (
 
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.products
+    ADD COLUMN IF NOT EXISTS sku TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS regular_price NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS slug TEXT DEFAULT '';
+
+CREATE OR REPLACE FUNCTION public.sync_product_price_and_sku()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.regular_price IS NOT NULL AND NEW.price IS NULL THEN
+        NEW.price := NEW.regular_price;
+    ELSIF NEW.price IS NOT NULL AND NEW.regular_price IS NULL THEN
+        NEW.regular_price := NEW.price;
+    END IF;
+    IF NEW.sku IS NULL OR NEW.sku = '' THEN
+        NEW.sku := 'SKU-' || substr(COALESCE(NEW.id::text, gen_random_uuid()::text), 1, 8);
+    END IF;
+    IF NEW.approval_status IS NOT NULL THEN
+        IF lower(NEW.approval_status) = 'approved' THEN
+            NEW.approval_status := 'Approved';
+        ELSIF lower(NEW.approval_status) IN ('pending', 'pendingreview', 'pending_review') THEN
+            NEW.approval_status := 'PendingReview';
+        ELSIF lower(NEW.approval_status) = 'draft' THEN
+            NEW.approval_status := 'Draft';
+        ELSIF lower(NEW.approval_status) = 'rejected' THEN
+            NEW.approval_status := 'Rejected';
+        ELSIF lower(NEW.approval_status) = 'archived' THEN
+            NEW.approval_status := 'Archived';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_product_price_and_sku ON public.products;
+CREATE TRIGGER trg_sync_product_price_and_sku
+BEFORE INSERT OR UPDATE ON public.products
+FOR EACH ROW EXECUTE FUNCTION public.sync_product_price_and_sku();
+
 -- E. buyer_orders (Temporary Compatibility Table for Phase 3/4)
 CREATE TABLE IF NOT EXISTS public.buyer_orders (
     id TEXT PRIMARY KEY,
@@ -200,6 +311,56 @@ CREATE TABLE IF NOT EXISTS public.buyer_orders (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE public.buyer_orders
+    ALTER COLUMN id SET DEFAULT ('ORD-' || substr(gen_random_uuid()::text, 1, 8)),
+    ALTER COLUMN customer_name DROP NOT NULL,
+    ALTER COLUMN customer_email DROP NOT NULL,
+    ALTER COLUMN customer_name SET DEFAULT 'Customer',
+    ALTER COLUMN customer_email SET DEFAULT 'customer@example.com';
+
+ALTER TABLE public.buyer_orders
+    ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS grand_total NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS shipping_fee NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS voucher_discount NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS total_discount NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS customer_notes TEXT,
+    ADD COLUMN IF NOT EXISTS notes TEXT,
+    ADD COLUMN IF NOT EXISTS seller_store_id UUID,
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+    ADD COLUMN IF NOT EXISTS order_number TEXT,
+    ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Pending';
+
+CREATE OR REPLACE FUNCTION public.sync_buyer_orders_amounts()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.customer_name := COALESCE(NEW.customer_name, 'Customer');
+    NEW.customer_email := COALESCE(NEW.customer_email, 'customer@example.com');
+    IF NEW.total_amount IS NOT NULL AND (NEW.amount IS NULL OR NEW.amount = 0) THEN
+        NEW.amount := NEW.total_amount;
+    ELSIF NEW.amount IS NOT NULL AND (NEW.total_amount IS NULL OR NEW.total_amount = 0) THEN
+        NEW.total_amount := NEW.amount;
+    END IF;
+    IF NEW.voucher_discount IS NOT NULL AND (NEW.total_discount IS NULL OR NEW.total_discount = 0) THEN
+        NEW.total_discount := NEW.voucher_discount;
+    ELSIF NEW.total_discount IS NOT NULL AND (NEW.voucher_discount IS NULL OR NEW.voucher_discount = 0) THEN
+        NEW.voucher_discount := NEW.total_discount;
+    END IF;
+    IF NEW.grand_total IS NULL THEN
+        NEW.grand_total := GREATEST(0.00, COALESCE(NEW.total_amount, NEW.amount, 0) - COALESCE(NEW.total_discount, NEW.voucher_discount, 0) + COALESCE(NEW.shipping_fee, 0));
+    END IF;
+    IF NEW.order_number IS NULL OR NEW.order_number = '' THEN
+        NEW.order_number := COALESCE(NEW.id, 'ORD-' || substr(gen_random_uuid()::text, 1, 8));
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_buyer_orders_amounts ON public.buyer_orders;
+CREATE TRIGGER trg_sync_buyer_orders_amounts
+BEFORE INSERT OR UPDATE ON public.buyer_orders
+FOR EACH ROW EXECUTE FUNCTION public.sync_buyer_orders_amounts();
 
 ALTER TABLE public.buyer_orders ENABLE ROW LEVEL SECURITY;
 
@@ -420,7 +581,7 @@ GRANT UPDATE (shop_name, shop_slug, business_name, business_address, city, count
 -- C. seller_kyc_documents: Protect status & review columns during INSERT and UPDATE
 REVOKE ALL ON public.seller_kyc_documents FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.seller_kyc_documents TO authenticated;
-GRANT INSERT (seller_store_id, document_type, document_url, cnic_number, ntn_number, submitted_by) ON public.seller_kyc_documents TO authenticated;
+GRANT INSERT (id, seller_store_id, document_type, document_url, cnic_number, ntn_number, status, submitted_by) ON public.seller_kyc_documents TO authenticated;
 
 -- D. products: Protect approval_status during INSERT and UPDATE
 REVOKE ALL ON public.products FROM PUBLIC, anon, authenticated;

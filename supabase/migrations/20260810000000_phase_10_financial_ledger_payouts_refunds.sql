@@ -42,13 +42,40 @@ CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(status);
 CREATE TABLE IF NOT EXISTS public.wallet_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     seller_store_id UUID UNIQUE NOT NULL REFERENCES public.seller_stores(id) ON DELETE CASCADE,
-    owner_id UUID NOT NULL REFERENCES auth.users(id),
+    owner_id UUID REFERENCES auth.users(id),
     currency TEXT NOT NULL DEFAULT 'PKR',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE public.wallet_accounts ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.wallet_accounts
+    ADD COLUMN IF NOT EXISTS current_balance NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS available_balance NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS held_balance NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS pending_balance NUMERIC(12,2) DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS pending_payout NUMERIC(12,2) DEFAULT 0.00;
+
+CREATE OR REPLACE FUNCTION public.sync_wallet_accounts_balances()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.owner_id IS NULL AND NEW.seller_store_id IS NOT NULL THEN
+        SELECT owner_id INTO NEW.owner_id FROM public.seller_stores WHERE id = NEW.seller_store_id;
+    END IF;
+    IF NEW.current_balance IS NOT NULL AND (NEW.available_balance IS NULL OR NEW.available_balance = 0) THEN
+        NEW.available_balance := NEW.current_balance;
+    ELSIF NEW.available_balance IS NOT NULL AND (NEW.current_balance IS NULL OR NEW.current_balance = 0) THEN
+        NEW.current_balance := NEW.available_balance;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_wallet_accounts_balances ON public.wallet_accounts;
+CREATE TRIGGER trg_sync_wallet_accounts_balances
+BEFORE INSERT OR UPDATE ON public.wallet_accounts
+FOR EACH ROW EXECUTE FUNCTION public.sync_wallet_accounts_balances();
 
 CREATE TABLE IF NOT EXISTS public.wallet_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

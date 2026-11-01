@@ -90,11 +90,31 @@ CREATE TABLE IF NOT EXISTS public.order_tracking_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id TEXT NOT NULL REFERENCES public.buyer_orders(id) ON DELETE CASCADE,
     seller_store_id UUID REFERENCES public.seller_stores(id),
-    event_type TEXT NOT NULL,
+    event_type TEXT,
+    status TEXT,
     description TEXT NOT NULL,
     location TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE OR REPLACE FUNCTION public.sync_tracking_event_type_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.status IS NULL AND NEW.event_type IS NOT NULL THEN
+        NEW.status := NEW.event_type;
+    ELSIF NEW.event_type IS NULL AND NEW.status IS NOT NULL THEN
+        NEW.event_type := NEW.status;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_tracking_event_type_status ON public.order_tracking_events;
+CREATE TRIGGER trg_sync_tracking_event_type_status
+    BEFORE INSERT OR UPDATE ON public.order_tracking_events
+    FOR EACH ROW EXECUTE FUNCTION public.sync_tracking_event_type_status();
 
 ALTER TABLE public.order_tracking_events ENABLE ROW LEVEL SECURITY;
 
@@ -131,13 +151,34 @@ CREATE TABLE IF NOT EXISTS public.return_requests (
     reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
     description TEXT,
     evidence_paths TEXT[] DEFAULT '{}'::TEXT[],
-    status TEXT NOT NULL DEFAULT 'Requested' CHECK (status IN ('Requested', 'Approved', 'Rejected', 'Completed')),
+    evidence_urls TEXT[] DEFAULT '{}'::TEXT[],
+    status TEXT NOT NULL DEFAULT 'Requested' CHECK (status IN ('Pending', 'Requested', 'Approved', 'Rejected', 'Completed', 'Arbitrated')),
     admin_notes TEXT,
     processed_by UUID REFERENCES auth.users(id),
     refund_id UUID REFERENCES public.refunds(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE public.return_requests
+    ADD COLUMN IF NOT EXISTS return_reason TEXT;
+
+CREATE OR REPLACE FUNCTION public.sync_return_requests_reason()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.reason IS NOT NULL AND NEW.return_reason IS NULL THEN
+        NEW.return_reason := NEW.reason;
+    ELSIF NEW.return_reason IS NOT NULL AND NEW.reason IS NULL THEN
+        NEW.reason := NEW.return_reason;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_return_requests_reason ON public.return_requests;
+CREATE TRIGGER trg_sync_return_requests_reason
+BEFORE INSERT OR UPDATE ON public.return_requests
+FOR EACH ROW EXECUTE FUNCTION public.sync_return_requests_reason();
 
 ALTER TABLE public.return_requests ENABLE ROW LEVEL SECURITY;
 
@@ -177,6 +218,26 @@ CREATE TABLE IF NOT EXISTS public.product_reviews (
 
 ALTER TABLE public.product_reviews ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.product_reviews ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE public.product_reviews ALTER COLUMN order_item_id DROP NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.sync_product_reviews_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.user_id IS NOT NULL AND NEW.buyer_user_id IS NULL THEN
+        NEW.buyer_user_id := NEW.user_id;
+    ELSIF NEW.buyer_user_id IS NOT NULL AND NEW.user_id IS NULL THEN
+        NEW.user_id := NEW.buyer_user_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_product_reviews_user ON public.product_reviews;
+CREATE TRIGGER trg_sync_product_reviews_user
+BEFORE INSERT OR UPDATE ON public.product_reviews
+FOR EACH ROW EXECUTE FUNCTION public.sync_product_reviews_user();
+
 CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON public.product_reviews(product_id);
 CREATE INDEX IF NOT EXISTS idx_product_reviews_buyer ON public.product_reviews(buyer_user_id);
 
@@ -196,6 +257,7 @@ CREATE TABLE IF NOT EXISTS public.chat_rooms (
     product_id UUID REFERENCES public.products(id),
     order_id TEXT REFERENCES public.buyer_orders(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chat_rooms_buyer_seller_product_key UNIQUE (buyer_user_id, seller_store_id, product_id)
 );
 
@@ -221,10 +283,28 @@ CREATE POLICY "Chat room participant select" ON public.chat_rooms
 CREATE TABLE IF NOT EXISTS public.chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_id UUID NOT NULL REFERENCES public.chat_rooms(id) ON DELETE CASCADE,
-    sender_id UUID NOT NULL REFERENCES auth.users(id),
+    sender_id UUID REFERENCES auth.users(id),
+    sender_user_id UUID REFERENCES auth.users(id),
     message_text TEXT NOT NULL CHECK (length(trim(message_text)) > 0 AND length(message_text) <= 2000),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE OR REPLACE FUNCTION public.sync_chat_messages_sender()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sender_id IS NOT NULL AND NEW.sender_user_id IS NULL THEN
+        NEW.sender_user_id := NEW.sender_id;
+    ELSIF NEW.sender_user_id IS NOT NULL AND NEW.sender_id IS NULL THEN
+        NEW.sender_id := NEW.sender_user_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_chat_messages_sender ON public.chat_messages;
+CREATE TRIGGER trg_sync_chat_messages_sender
+BEFORE INSERT OR UPDATE ON public.chat_messages
+FOR EACH ROW EXECUTE FUNCTION public.sync_chat_messages_sender();
 
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 
@@ -276,6 +356,24 @@ GRANT SELECT ON public.notifications TO authenticated;
 
 CREATE POLICY "User views own notifications" ON public.notifications
     FOR SELECT USING (user_id = auth.uid());
+
+CREATE OR REPLACE VIEW public.user_notifications AS
+SELECT
+    id,
+    user_id,
+    type AS notification_type,
+    type,
+    title,
+    body,
+    entity_type,
+    entity_id,
+    event_key,
+    is_read,
+    read_at,
+    created_at
+FROM public.notifications;
+
+GRANT SELECT ON public.user_notifications TO authenticated, anon;
 
 -- ----------------------------------------------------------------------------
 -- 9. PRIVATE STORAGE BUCKET FOR RETURN EVIDENCE
@@ -344,7 +442,30 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
-REVOKE EXECUTE ON FUNCTION public.internal_create_notification FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.internal_create_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.internal_create_notification(
+    p_user_id UUID,
+    p_type TEXT,
+    p_title TEXT,
+    p_body TEXT,
+    p_metadata JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID AS $$
+BEGIN
+    RETURN public.internal_create_notification(
+        p_user_id,
+        p_type,
+        p_title,
+        p_body,
+        p_metadata->>'entity_type',
+        COALESCE(p_metadata->>'entity_id', p_metadata->>'order_id', p_metadata->>'room_id'),
+        p_metadata->>'event_key'
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+
+REVOKE EXECUTE ON FUNCTION public.internal_create_notification(UUID, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 11. SERVER-AUTHORITATIVE RPC: MARK NOTIFICATION AS READ

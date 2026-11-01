@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS public.rate_limit_events (
 
 ALTER TABLE public.rate_limit_events ENABLE ROW LEVEL SECURITY;
 
+REVOKE ALL ON public.rate_limit_events FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.rate_limit_events TO authenticated;
+
 CREATE POLICY rate_limit_events_admin_all ON public.rate_limit_events
     FOR ALL
     TO authenticated
@@ -21,7 +24,7 @@ CREATE POLICY rate_limit_events_admin_all ON public.rate_limit_events
         EXISTS (
             SELECT 1 FROM public.user_roles ur
             WHERE ur.user_id = auth.uid()
-            AND ur.role IN ('owner', 'superAdmin', 'fraudAnalyst')
+            AND ur.role IN ('owner', 'super_admin', 'admin')
         )
     );
 

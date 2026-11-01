@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS public.seller_payout_requests (
     account_title TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Processed')),
     rejection_reason TEXT,
+    admin_notes TEXT,
+    processed_at TIMESTAMPTZ,
     processed_by UUID REFERENCES auth.users(id),
     gateway_reference TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -117,6 +119,10 @@ GRANT INSERT, UPDATE, DELETE ON public.categories TO authenticated;
 -- ----------------------------------------------------------------------------
 -- 4. SELLER PAYOUT REQUEST RPC (seller_request_payout)
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.seller_request_payout(NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS public.seller_request_payout(NUMERIC(12,2), TEXT);
+DROP FUNCTION IF EXISTS public.seller_request_payout(UUID, NUMERIC, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.seller_request_payout(UUID, NUMERIC(12,2), TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.seller_request_payout(
     p_store_id UUID,
     p_amount NUMERIC(12,2),
@@ -210,6 +216,8 @@ $$;
 -- ----------------------------------------------------------------------------
 -- 5. ADMIN PROCESS PAYOUT RPC (admin_process_payout)
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.admin_process_payout(UUID, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.admin_process_payout(UUID, TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.admin_process_payout(
     p_payout_id UUID,
     p_action TEXT,

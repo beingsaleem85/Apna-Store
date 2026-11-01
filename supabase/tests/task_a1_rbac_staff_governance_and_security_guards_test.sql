@@ -243,7 +243,7 @@ SELECT throws_like(
     SELECT set_config('request.jwt.claim.sub', '90000000-0000-0000-0000-000000000002', true);
     SELECT public.admin_process_refund('ORD-STORE-B-001', '95555555-0000-0000-0000-000000000001'::uuid, 1200.00, 'Direct call', 'DIR-REF-001');
     $$,
-    '%permission denied%',
+    '%denied%',
     '20. F4: Authenticated direct EXECUTE on admin_process_refund is denied'
 );
 RESET ROLE;

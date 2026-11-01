@@ -216,14 +216,19 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.quote_order TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.quote_order(JSONB, TEXT, TEXT) TO authenticated, anon;
 
 -- ----------------------------------------------------------------------------
 -- 4. SELLER FULFILLMENT STATE MACHINE RPC
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.seller_update_fulfillment_status(TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.seller_update_fulfillment_status(
     p_order_id TEXT,
     p_new_status TEXT,
+    p_seller_store_id UUID DEFAULT NULL,
+    p_courier_name TEXT DEFAULT NULL,
+    p_tracking_number TEXT DEFAULT NULL,
     p_notes TEXT DEFAULT NULL
 )
 RETURNS JSONB
@@ -234,6 +239,7 @@ AS $$
 DECLARE
     v_order RECORD;
     v_seller_store RECORD;
+    v_target_store_id UUID;
     v_current_user_id UUID := auth.uid();
 BEGIN
     IF v_current_user_id IS NULL THEN
@@ -241,13 +247,21 @@ BEGIN
     END IF;
 
     -- Locate seller store owned by caller
-    SELECT id, is_approved INTO v_seller_store
-    FROM public.seller_stores
-    WHERE owner_id = v_current_user_id;
+    IF p_seller_store_id IS NOT NULL THEN
+        SELECT id, is_approved INTO v_seller_store
+        FROM public.seller_stores
+        WHERE id = p_seller_store_id AND owner_id = v_current_user_id;
+    ELSE
+        SELECT id, is_approved INTO v_seller_store
+        FROM public.seller_stores
+        WHERE owner_id = v_current_user_id;
+    END IF;
 
-    IF NOT FOUND THEN
+    IF v_seller_store.id IS NULL THEN
         RAISE EXCEPTION 'User does not own a registered seller store.' USING ERRCODE = '42501';
     END IF;
+
+    v_target_store_id := v_seller_store.id;
 
     -- Lock order for update
     SELECT id, order_number, status, seller_store_id
@@ -260,9 +274,11 @@ BEGIN
         RAISE EXCEPTION 'Order not found.' USING ERRCODE = 'P0002';
     END IF;
 
-    -- Verify ownership
-    IF v_order.seller_store_id != v_seller_store.id THEN
-        RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store.' USING ERRCODE = '42501';
+    -- Verify ownership (via order seller_store_id or order_items)
+    IF v_order.seller_store_id IS NOT NULL AND v_order.seller_store_id != v_target_store_id THEN
+        IF NOT EXISTS (SELECT 1 FROM public.order_items WHERE order_id = p_order_id AND seller_store_id = v_target_store_id) THEN
+            RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store.' USING ERRCODE = '42501';
+        END IF;
     END IF;
 
     -- Enforce Strict Forward State Transitions
@@ -295,16 +311,18 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.seller_update_fulfillment_status TO authenticated;
+GRANT EXECUTE ON FUNCTION public.seller_update_fulfillment_status(TEXT, TEXT, UUID, TEXT, TEXT, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 5. VERIFIED PRODUCT REVIEW SUBMISSION RPC
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.submit_product_review(UUID, NUMERIC, TEXT, JSONB);
+
 CREATE OR REPLACE FUNCTION public.submit_product_review(
     p_product_id UUID,
-    p_rating NUMERIC,
-    p_review_text TEXT,
-    p_images JSONB DEFAULT '[]'::jsonb
+    p_order_item_id UUID,
+    p_rating INT,
+    p_comment TEXT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -312,88 +330,74 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-    v_user_id UUID := auth.uid();
-    v_has_delivered_order BOOLEAN := FALSE;
+    v_buyer_id UUID := auth.uid();
+    v_order_item RECORD;
     v_review_id UUID;
-    v_new_avg_rating NUMERIC(3,2);
-    v_total_reviews INT;
 BEGIN
-    IF v_user_id IS NULL THEN
+    IF v_buyer_id IS NULL THEN
         RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
     END IF;
 
-    IF p_rating < 1.0 OR p_rating > 5.0 THEN
-        RAISE EXCEPTION 'Rating must be between 1.0 and 5.0' USING ERRCODE = '22023';
+    IF p_rating IS NULL OR p_rating < 1 OR p_rating > 5 THEN
+        RAISE EXCEPTION 'Rating must be an integer between 1 and 5.' USING ERRCODE = '22023';
     END IF;
 
-    -- Verify that caller actually purchased and received this product
-    SELECT EXISTS (
-        SELECT 1
-        FROM public.buyer_orders bo
-        JOIN public.order_items oi ON oi.order_id = bo.id
-        WHERE bo.customer_user_id = v_user_id
-          AND oi.product_id = p_product_id
-          AND bo.status = 'Delivered'
-    ) INTO v_has_delivered_order;
-
-    IF NOT v_has_delivered_order THEN
-        RAISE EXCEPTION 'Verified purchase required. You can only review products that have been delivered to you.' USING ERRCODE = '42501';
+    IF p_comment IS NULL OR trim(p_comment) = '' THEN
+        RAISE EXCEPTION 'Review comment cannot be empty.' USING ERRCODE = '22023';
     END IF;
 
-    -- Insert or update review
+    SELECT oi.id, oi.order_id, oi.product_id, bo.customer_user_id, bo.status
+    INTO v_order_item
+    FROM public.order_items oi
+    JOIN public.buyer_orders bo ON bo.id = oi.order_id
+    WHERE oi.id = p_order_item_id;
+
+    IF v_order_item.id IS NULL THEN
+        RAISE EXCEPTION 'Order line item not found.' USING ERRCODE = 'P0002';
+    END IF;
+
+    IF v_order_item.customer_user_id <> v_buyer_id THEN
+        RAISE EXCEPTION 'Access denied: You do not own this order.' USING ERRCODE = '42501';
+    END IF;
+
+    IF v_order_item.status <> 'Delivered' THEN
+        RAISE EXCEPTION 'Product reviews are only permitted for Delivered orders.' USING ERRCODE = '22023';
+    END IF;
+
     INSERT INTO public.product_reviews (
-        product_id,
-        user_id,
-        rating,
-        review_text,
-        is_verified_purchase,
-        created_at
+        product_id, order_item_id, buyer_user_id, rating, comment, is_verified_purchase
+    ) VALUES (
+        p_product_id, p_order_item_id, v_buyer_id, p_rating, p_comment, TRUE
     )
-    VALUES (
-        p_product_id,
-        v_user_id,
-        p_rating,
-        p_review_text,
-        TRUE,
-        NOW()
-    )
-    ON CONFLICT (product_id, user_id) DO UPDATE
+    ON CONFLICT (order_item_id) DO UPDATE
     SET rating = EXCLUDED.rating,
-        review_text = EXCLUDED.review_text,
+        comment = EXCLUDED.comment,
         updated_at = NOW()
     RETURNING id INTO v_review_id;
-
-    -- Calculate updated product average rating
-    SELECT ROUND(AVG(rating)::NUMERIC, 2), COUNT(*)
-    INTO v_new_avg_rating, v_total_reviews
-    FROM public.product_reviews
-    WHERE product_id = p_product_id;
-
-    -- Update product table rating
-    UPDATE public.products
-    SET rating = v_new_avg_rating
-    WHERE id = p_product_id;
 
     RETURN jsonb_build_object(
         'success', true,
         'review_id', v_review_id,
-        'new_rating', v_new_avg_rating,
-        'total_reviews', v_total_reviews
+        'product_id', p_product_id,
+        'rating', p_rating
     );
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.submit_product_review TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_product_review(UUID, UUID, INT, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 6. RETURNS & REFUNDS RPCs
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.submit_return_request(TEXT, UUID, TEXT, TEXT, JSONB);
+
 CREATE OR REPLACE FUNCTION public.submit_return_request(
     p_order_id TEXT,
-    p_product_id UUID,
+    p_order_item_id UUID,
+    p_quantity INT,
     p_reason TEXT,
-    p_details TEXT DEFAULT NULL,
-    p_images JSONB DEFAULT '[]'::jsonb
+    p_description TEXT DEFAULT NULL,
+    p_evidence_paths TEXT[] DEFAULT '{}'::TEXT[]
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -402,45 +406,34 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_user_id UUID := auth.uid();
-    v_order RECORD;
+    v_order_item RECORD;
     v_return_id UUID;
 BEGIN
     IF v_user_id IS NULL THEN
         RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
     END IF;
 
-    SELECT id, customer_user_id, status, created_at
-    INTO v_order
-    FROM public.buyer_orders
-    WHERE id = p_order_id;
+    SELECT oi.id, oi.seller_store_id, bo.customer_user_id, bo.status
+    INTO v_order_item
+    FROM public.order_items oi
+    JOIN public.buyer_orders bo ON bo.id = oi.order_id
+    WHERE oi.id = p_order_item_id AND bo.id = p_order_id;
 
-    IF NOT FOUND OR v_order.customer_user_id != v_user_id THEN
-        RAISE EXCEPTION 'Order not found or unauthorized.' USING ERRCODE = '42501';
+    IF v_order_item.id IS NULL OR v_order_item.customer_user_id != v_user_id THEN
+        RAISE EXCEPTION 'Order item not found or unauthorized.' USING ERRCODE = '42501';
     END IF;
 
-    IF v_order.status != 'Delivered' THEN
+    IF v_order_item.status != 'Delivered' THEN
         RAISE EXCEPTION 'Return requests can only be submitted for Delivered orders.' USING ERRCODE = '22023';
     END IF;
 
     INSERT INTO public.return_requests (
-        order_id,
-        user_id,
-        product_id,
-        reason,
-        details,
-        status,
-        created_at
-    )
-    VALUES (
-        p_order_id,
-        v_user_id,
-        p_product_id,
-        p_reason,
-        p_details,
-        'Pending',
-        NOW()
-    )
-    RETURNING id INTO v_return_id;
+        order_id, order_item_id, seller_store_id, customer_user_id,
+        quantity, reason, description, evidence_paths, status
+    ) VALUES (
+        p_order_id, p_order_item_id, v_order_item.seller_store_id, v_user_id,
+        p_quantity, p_reason, p_description, p_evidence_paths, 'Pending'
+    ) RETURNING id INTO v_return_id;
 
     RETURN jsonb_build_object(
         'success', true,
@@ -450,7 +443,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.submit_return_request TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_return_request(TEXT, UUID, INT, TEXT, TEXT, TEXT[]) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.review_return_request(
     p_return_id UUID,
@@ -497,4 +490,4 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.review_return_request TO authenticated;
+GRANT EXECUTE ON FUNCTION public.review_return_request(UUID, TEXT, TEXT) TO authenticated;

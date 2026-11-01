@@ -75,12 +75,15 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_flash_sale_products(INT) TO anon, authenticated;
 
 -- 3. Order Tracking Events RPC
+DROP FUNCTION IF EXISTS public.get_order_tracking_events(UUID);
+DROP FUNCTION IF EXISTS public.get_order_tracking_events(TEXT);
+
 CREATE OR REPLACE FUNCTION public.get_order_tracking_events(
-    p_order_id UUID
+    p_order_id TEXT
 )
 RETURNS TABLE (
     id UUID,
-    order_id UUID,
+    order_id TEXT,
     status TEXT,
     description TEXT,
     location TEXT,
@@ -93,7 +96,7 @@ AS $$
     SELECT 
         ote.id,
         ote.order_id,
-        ote.status,
+        COALESCE(ote.status, ote.event_type) AS status,
         ote.description,
         ote.location,
         ote.created_at
@@ -101,7 +104,7 @@ AS $$
     JOIN public.buyer_orders bo ON bo.id = ote.order_id
     WHERE ote.order_id = p_order_id
       AND (
-          bo.buyer_id = auth.uid()
+          bo.customer_user_id = auth.uid()
           OR EXISTS (
               SELECT 1 FROM public.store_fulfillments sf
               JOIN public.seller_stores ss ON ss.id = sf.seller_store_id
@@ -110,15 +113,36 @@ AS $$
           OR EXISTS (
               SELECT 1 FROM public.user_roles ur
               WHERE ur.user_id = auth.uid()
-                AND ur.role IN ('superAdmin', 'owner', 'orderManager', 'supportAdmin', 'auditor')
+                AND ur.role IN ('admin', 'super_admin', 'owner')
           )
       )
     ORDER BY ote.created_at ASC;
 $$;
 
+CREATE OR REPLACE FUNCTION public.get_order_tracking_events(
+    p_order_id UUID
+)
+RETURNS TABLE (
+    id UUID,
+    order_id TEXT,
+    status TEXT,
+    description TEXT,
+    location TEXT,
+    created_at TIMESTAMPTZ
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT * FROM public.get_order_tracking_events(p_order_id::TEXT);
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_order_tracking_events(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_order_tracking_events(UUID) TO authenticated;
 
 -- 4. Multi-Payment create_atomic_order update
+DROP FUNCTION IF EXISTS public.create_atomic_order(TEXT, JSONB, JSONB, TEXT);
+
 CREATE OR REPLACE FUNCTION public.create_atomic_order(
     p_items JSONB,
     p_shipping_address JSONB,
@@ -133,7 +157,7 @@ SET search_path = public
 AS $$
 DECLARE
     v_buyer_id UUID;
-    v_order_id UUID;
+    v_order_id TEXT;
     v_order_number TEXT;
     v_total_amount NUMERIC(12,2) := 0;
     v_shipping_fee NUMERIC(12,2) := 150.00;

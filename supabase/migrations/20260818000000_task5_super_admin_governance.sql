@@ -27,14 +27,14 @@ CREATE POLICY "Allow admin write on commission rules"
         EXISTS (
             SELECT 1 FROM public.user_roles ur
             WHERE ur.user_id = auth.uid()
-              AND ur.role IN ('superAdmin', 'owner', 'financeAdmin')
+              AND ur.role IN ('super_admin', 'owner', 'admin')
         )
     )
     WITH CHECK (
         EXISTS (
             SELECT 1 FROM public.user_roles ur
             WHERE ur.user_id = auth.uid()
-              AND ur.role IN ('superAdmin', 'owner', 'financeAdmin')
+              AND ur.role IN ('super_admin', 'owner', 'admin')
         )
     );
 
@@ -75,7 +75,7 @@ CREATE POLICY "Users can read own support tickets"
         OR EXISTS (
             SELECT 1 FROM public.user_roles ur
             WHERE ur.user_id = auth.uid()
-              AND ur.role IN ('superAdmin', 'owner', 'supportAdmin')
+              AND ur.role IN ('super_admin', 'owner', 'admin')
         )
     );
 
@@ -91,7 +91,7 @@ CREATE POLICY "Admins can update support tickets"
         EXISTS (
             SELECT 1 FROM public.user_roles ur
             WHERE ur.user_id = auth.uid()
-              AND ur.role IN ('superAdmin', 'owner', 'supportAdmin')
+              AND ur.role IN ('super_admin', 'owner', 'admin')
         )
     );
 
@@ -119,7 +119,7 @@ CREATE POLICY "Public read active banners"
     USING (is_active = TRUE OR EXISTS (
         SELECT 1 FROM public.user_roles ur
         WHERE ur.user_id = auth.uid()
-          AND ur.role IN ('superAdmin', 'owner', 'marketingManager')
+          AND ur.role IN ('super_admin', 'owner', 'admin')
     ));
 
 CREATE POLICY "Admins manage banners"
@@ -129,7 +129,7 @@ CREATE POLICY "Admins manage banners"
         EXISTS (
             SELECT 1 FROM public.user_roles ur
             WHERE ur.user_id = auth.uid()
-              AND ur.role IN ('superAdmin', 'owner', 'marketingManager')
+              AND ur.role IN ('super_admin', 'owner', 'admin')
         )
     );
 
@@ -164,7 +164,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM public.user_roles
         WHERE user_id = v_admin_id
-          AND role IN ('superAdmin', 'owner', 'financeAdmin')
+          AND role IN ('super_admin', 'owner', 'admin')
     ) THEN
         RAISE EXCEPTION 'Access denied: Insufficient privileges to update commission rule.';
     END IF;
@@ -225,7 +225,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM public.user_roles
         WHERE user_id = v_admin_id
-          AND role IN ('superAdmin', 'owner', 'marketingManager')
+          AND role IN ('super_admin', 'owner', 'admin')
     ) THEN
         RAISE EXCEPTION 'Access denied: Insufficient privileges to broadcast notifications.';
     END IF;

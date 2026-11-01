@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS public.order_items (
     variant_id UUID REFERENCES public.product_variants(id),
     seller_store_id UUID NOT NULL REFERENCES public.seller_stores(id),
     product_name TEXT NOT NULL,
-    sku TEXT NOT NULL,
+    sku TEXT NOT NULL DEFAULT 'SKU-DEFAULT',
     unit_price NUMERIC(12,2) NOT NULL CHECK (unit_price >= 0.00),
     sale_price NUMERIC(12,2) CHECK (sale_price IS NULL OR sale_price >= 0.00),
     quantity INT NOT NULL CHECK (quantity > 0),
@@ -52,6 +52,21 @@ CREATE TABLE IF NOT EXISTS public.order_items (
     seller_payable NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (seller_payable >= 0.00),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE OR REPLACE FUNCTION public.sync_order_items_sku()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sku IS NULL OR NEW.sku = '' THEN
+        NEW.sku := COALESCE((SELECT sku FROM public.products WHERE id = NEW.product_id), 'SKU-DEFAULT');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_order_items_sku ON public.order_items;
+CREATE TRIGGER trg_sync_order_items_sku
+BEFORE INSERT ON public.order_items
+FOR EACH ROW EXECUTE FUNCTION public.sync_order_items_sku();
 
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 

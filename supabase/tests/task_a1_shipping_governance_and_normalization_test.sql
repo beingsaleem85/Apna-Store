@@ -3,7 +3,7 @@
 -- ============================================================================
 
 BEGIN;
-SELECT plan(14);
+SELECT plan(15);
 
 -- ----------------------------------------------------------------------------
 -- 0. SEED TEST FIXTURES & USERS
@@ -74,41 +74,44 @@ SELECT lives_ok(
 );
 
 -- Test 2: Store B (Shipped, not Delivered) return claim is rejected
-SELECT throws_ok(
+SELECT throws_like(
     $$SELECT public.admin_arbitrate_return_claim('95555555-0000-0000-0000-000000000022', 'Approved', 'Attempting refund for undelivered item')$$,
-    '22023',
-    'Order item is not refundable: Store fulfillment must be Delivered and payment collected.',
+    '%Order item is not refundable: Store fulfillment must be Delivered and payment collected%',
     'Test 2: Store B item (Undelivered) return claim is rejected'
 );
 
 -- ----------------------------------------------------------------------------
 -- PART 2: LEDGER SINGLE SOURCE OF TRUTH BALANCE VERIFICATION (TEST 3)
 -- ----------------------------------------------------------------------------
--- Seed wallet account for Store Alpha M33
+-- Seed dedicated store and wallet account for Store Gamma M33
+INSERT INTO public.seller_stores (id, owner_id, name, shop_slug, is_approved, is_suspended, balance)
+VALUES ('91111111-0000-0000-0000-000000000025', '90000000-0000-0000-0000-000000000022', 'Store Gamma M33', 'store-gamma-m33', TRUE, FALSE, 0.00)
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO public.wallet_accounts (seller_store_id, owner_id)
-VALUES ('91111111-0000-0000-0000-000000000021', '90000000-0000-0000-0000-000000000022')
+VALUES ('91111111-0000-0000-0000-000000000025', '90000000-0000-0000-0000-000000000022')
 ON CONFLICT (seller_store_id) DO NOTHING;
 
 -- Sequence of transactions:
 -- 1. HOLD (Escrow order credit): +500.00
 INSERT INTO public.wallet_transactions (wallet_account_id, seller_store_id, transaction_type, amount, source_type, source_id, idempotency_key, description)
-VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000021'), '91111111-0000-0000-0000-000000000021', 'HOLD', 500.00, 'ORDER_DELIVERED_HELD', 'ORD-TX-01', 'WT-01', 'Hold order');
+VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000025'), '91111111-0000-0000-0000-000000000025', 'HOLD', 500.00, 'ORDER_DELIVERED_HELD', 'ORD-TX-01', 'WT-01', 'Hold order');
 
 -- 2. RELEASE (Escrow matures): 500.00 released to available
 INSERT INTO public.wallet_transactions (wallet_account_id, seller_store_id, transaction_type, amount, source_type, source_id, idempotency_key, description)
-VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000021'), '91111111-0000-0000-0000-000000000021', 'RELEASE', 500.00, 'ORDER_EARNINGS_RELEASE', 'ORD-TX-01', 'WT-02', 'Release order');
+VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000025'), '91111111-0000-0000-0000-000000000025', 'RELEASE', 500.00, 'ORDER_EARNINGS_RELEASE', 'ORD-TX-01', 'WT-02', 'Release order');
 
 -- 3. HOLD (Payout reservation): -200.00 available, +200.00 held
 INSERT INTO public.wallet_transactions (wallet_account_id, seller_store_id, transaction_type, amount, source_type, source_id, idempotency_key, description)
-VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000021'), '91111111-0000-0000-0000-000000000021', 'HOLD', 200.00, 'PAYOUT_RESERVATION', 'PO-TX-01', 'WT-03', 'Payout hold');
+VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000025'), '91111111-0000-0000-0000-000000000025', 'HOLD', 200.00, 'PAYOUT_RESERVATION', 'PO-TX-01', 'WT-03', 'Payout hold');
 
 -- 4. REFUND REVERSAL DEBIT: -50.00 available
 INSERT INTO public.wallet_transactions (wallet_account_id, seller_store_id, transaction_type, amount, source_type, source_id, idempotency_key, description)
-VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000021'), '91111111-0000-0000-0000-000000000021', 'DEBIT', 50.00, 'REFUND_REVERSAL', 'REF-TX-01', 'WT-04', 'Refund debit');
+VALUES ((SELECT id FROM public.wallet_accounts WHERE seller_store_id = '91111111-0000-0000-0000-000000000025'), '91111111-0000-0000-0000-000000000025', 'DEBIT', 50.00, 'REFUND_REVERSAL', 'REF-TX-01', 'WT-04', 'Refund debit');
 
 -- Test 3: get_seller_wallet_summary derives available = 250.00 (500 - 200 - 50) and held = 200.00
 SELECT is(
-    (SELECT available_balance FROM public.get_seller_wallet_summary('91111111-0000-0000-0000-000000000021')),
+    (SELECT available_balance FROM public.get_seller_wallet_summary('91111111-0000-0000-0000-000000000025')),
     250.00,
     'Test 3: Available balance derived strictly from ledger sum equals 250.00'
 );

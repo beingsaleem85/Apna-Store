@@ -116,7 +116,7 @@ SELECT throws_like(
 -- 3. (c) Suspended store is rejected
 SELECT throws_like(
     $$ SELECT public.seller_update_fulfillment_status('ORD-MULTI-M26', 'Processing', '81111111-0000-0000-0000-000000000003'::uuid); $$,
-    '%Unauthorized to update fulfillment status for this store.%',
+    '%Access denied: You do not own store%',
     '3. Suspended or unowned store fulfillment is rejected'
 );
 
@@ -129,11 +129,13 @@ SELECT is(
 
 -- Transition to Shipped then Delivered
 SELECT public.seller_update_fulfillment_status('ORD-MULTI-M26', 'Shipped', '81111111-0000-0000-0000-000000000001'::uuid, 'TCS', 'TRK-ALPHA-01');
-SELECT public.seller_update_fulfillment_status('ORD-MULTI-M26', 'Delivered', '81111111-0000-0000-0000-000000000001'::uuid);
+SELECT set_config('request.jwt.claim.sub', '80000000-0000-0000-0000-000000000010', true);
+SELECT public.admin_mark_order_delivered('ORD-MULTI-M26', '81111111-0000-0000-0000-000000000001'::uuid);
+SELECT set_config('request.jwt.claim.sub', '80000000-0000-0000-0000-000000000002', true);
 
 -- 5. (d) On Delivered for COD: Seller wallet transaction credited with seller_payable (450.00)
 SELECT is(
-    (SELECT count(*)::INT FROM public.wallet_transactions WHERE seller_store_id = '81111111-0000-0000-0000-000000000001' AND transaction_type = 'CREDIT' AND source_type = 'ORDER_FULFILLMENT'),
+    (SELECT count(*)::INT FROM public.wallet_transactions WHERE seller_store_id = '81111111-0000-0000-0000-000000000001' AND transaction_type IN ('HOLD', 'CREDIT') AND source_type IN ('ORDER_DELIVERED_HELD', 'ORDER_FULFILLMENT')),
     1,
     '5. Delivered COD accrues seller payable in wallet_transactions'
 );

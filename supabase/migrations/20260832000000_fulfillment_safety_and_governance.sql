@@ -51,9 +51,9 @@ ALTER TABLE public.wallet_transactions ADD CONSTRAINT wallet_transactions_source
         'ORDER_FULFILLMENT', 'ORDER_DELIVERED_HELD', 'ORDER_EARNINGS_RELEASE'
     ));
 
--- Unique constraint on wallet transaction source per store to guarantee exactly-once credit
+-- Unique constraint on wallet transaction source per store to guarantee exactly-once credit per transaction type
 CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_txn_store_source
-ON public.wallet_transactions (seller_store_id, source_type, source_id);
+ON public.wallet_transactions (seller_store_id, transaction_type, source_type, source_id);
 
 -- Ensure roles module permissions are seeded in staff_role_permissions
 INSERT INTO public.staff_role_permissions (staff_role, module, action) VALUES
@@ -104,12 +104,19 @@ BEGIN
         RAISE EXCEPTION 'Account is deactivated. Please contact support.' USING ERRCODE = '42501';
     END IF;
 
-    -- Money Safety Rule: Sellers CANNOT set Delivered
+    -- Money Safety Rule: Sellers CANNOT set Delivered unless caller is admin / logistics
     IF p_new_status = 'Delivered' THEN
-        RAISE EXCEPTION 'Access denied: Sellers cannot mark orders as Delivered. Delivery must be verified by admin or courier.' USING ERRCODE = '42501';
+        IF public.has_permission('orders', 'release') OR public.has_permission('shipping', 'update')
+           OR EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = v_current_user_id AND role IN ('admin', 'super_admin', 'owner')) THEN
+            IF p_seller_store_id IS NOT NULL THEN
+                RETURN public.admin_mark_order_delivered(p_order_id, p_seller_store_id);
+            END IF;
+        ELSE
+            RAISE EXCEPTION 'Access denied: Sellers cannot mark orders as Delivered. Delivery must be verified by admin or courier.' USING ERRCODE = '42501';
+        END IF;
     END IF;
 
-    IF p_new_status NOT IN ('Processing', 'Shipped', 'Cancelled') THEN
+    IF p_new_status NOT IN ('Processing', 'Shipped', 'Cancelled', 'Delivered') THEN
         RAISE EXCEPTION 'Invalid seller status transition: %. Allowed values are Processing, Shipped, or Cancelled.', p_new_status USING ERRCODE = '22023';
     END IF;
 
@@ -133,7 +140,7 @@ BEGIN
               AND oi.seller_store_id = p_seller_store_id
               AND ss.owner_id = v_current_user_id
         ) THEN
-            RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store.' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'Access denied: You do not own store %.', p_seller_store_id USING ERRCODE = 'P0001';
         END IF;
         v_target_store_id := p_seller_store_id;
     ELSE
@@ -144,7 +151,7 @@ BEGIN
           AND ss.owner_id = v_current_user_id;
 
         IF v_store_count = 0 THEN
-            RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store.' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'Unauthorized to update fulfillment status for this store. User does not own a registered seller store.' USING ERRCODE = '42501';
         ELSIF v_store_count > 1 THEN
             RAISE EXCEPTION 'Multiple stores found for this order. Please specify p_seller_store_id.' USING ERRCODE = '22023';
         END IF;
@@ -179,7 +186,7 @@ BEGIN
     END IF;
 
     -- Enforce state transitions
-    IF v_old_status = 'Pending' AND p_new_status NOT IN ('Processing', 'Cancelled') THEN
+    IF v_old_status = 'Pending' AND p_new_status NOT IN ('Processing', 'Shipped', 'Cancelled') THEN
         RAISE EXCEPTION 'Pending fulfillment can only transition to Processing or Cancelled.' USING ERRCODE = '22023';
     ELSIF v_old_status = 'Processing' AND p_new_status NOT IN ('Shipped', 'Cancelled') THEN
         RAISE EXCEPTION 'Processing fulfillment can only transition to Shipped or Cancelled.' USING ERRCODE = '22023';
@@ -247,12 +254,36 @@ BEGIN
         'success', TRUE,
         'order_id', p_order_id,
         'seller_store_id', v_target_store_id,
-        'fulfillment_status', p_new_status
+        'fulfillment_status', p_new_status,
+        'store_fulfillment_status', p_new_status
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.seller_update_fulfillment_status(
+    p_order_id TEXT,
+    p_new_status TEXT,
+    p_notes TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    RETURN public.seller_update_fulfillment_status(
+        p_order_id => p_order_id,
+        p_new_status => p_new_status,
+        p_seller_store_id => NULL,
+        p_courier_name => NULL,
+        p_tracking_number => NULL,
+        p_notes => p_notes
     );
 END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.seller_update_fulfillment_status(TEXT, TEXT, UUID, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.seller_update_fulfillment_status(TEXT, TEXT, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 3. ADMIN / COURIER MARK ORDER DELIVERED RPC
@@ -384,7 +415,7 @@ BEGIN
         'ORDER_DELIVERED_HELD', p_order_id, 'WLT-HLD-' || p_order_id || '-' || p_seller_store_id,
         'Held earnings for order ' || p_order_id || ' (7-day escrow hold)', v_caller_id
     )
-    ON CONFLICT (seller_store_id, source_type, source_id) DO NOTHING;
+    ON CONFLICT (seller_store_id, transaction_type, source_type, source_id) DO NOTHING;
 
     -- Increment wallet_accounts.held_balance
     UPDATE public.wallet_accounts
@@ -413,6 +444,15 @@ BEGIN
             updated_at = NOW()
         WHERE order_id = p_order_id;
     END IF;
+
+    -- Insert tracking event
+    INSERT INTO public.order_tracking_events (
+        order_id, seller_store_id, event_type, status, description, location
+    ) VALUES (
+        p_order_id, p_seller_store_id, 'Delivered', 'Delivered',
+        'Store fulfillment delivered. ' || COALESCE(p_notes, ''),
+        'Customer Destination'
+    );
 
     -- Record audit log
     v_audit_id := public.internal_record_audit_log(
@@ -537,7 +577,7 @@ BEGIN
         'ORDER_EARNINGS_RELEASE', p_order_id, 'WLT-REL-' || p_order_id || '-' || p_seller_store_id,
         'Released earnings for order ' || p_order_id || ' following return window expiration', v_caller_id
     )
-    ON CONFLICT (seller_store_id, source_type, source_id) DO NOTHING;
+    ON CONFLICT (seller_store_id, transaction_type, source_type, source_id) DO NOTHING;
 
     -- Record audit log
     v_audit_id := public.internal_record_audit_log(
@@ -602,6 +642,11 @@ $$;
 -- Gated against deactivated accounts (42501).
 -- Restricts withdrawals strictly to available_balance (held balance cannot be withdrawn).
 
+DROP FUNCTION IF EXISTS public.seller_request_payout(UUID, NUMERIC, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.seller_request_payout(UUID, NUMERIC(12,2), TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.seller_request_payout(NUMERIC, TEXT);
+DROP FUNCTION IF EXISTS public.seller_request_payout(NUMERIC(12,2), TEXT);
+
 CREATE OR REPLACE FUNCTION public.seller_request_payout(
     p_amount NUMERIC(12,2),
     p_idempotency_key TEXT
@@ -658,7 +703,7 @@ BEGIN
     END IF;
 
     -- Ensure Wallet Account exists
-    SELECT id, available_balance INTO v_wallet_account_id, v_available_balance
+    SELECT id INTO v_wallet_account_id
     FROM public.wallet_accounts
     WHERE seller_store_id = v_store.id
     FOR UPDATE;
@@ -666,8 +711,13 @@ BEGIN
     IF v_wallet_account_id IS NULL THEN
         INSERT INTO public.wallet_accounts (seller_store_id, owner_id)
         VALUES (v_store.id, v_seller_id)
-        RETURNING id, available_balance INTO v_wallet_account_id, v_available_balance;
+        RETURNING id INTO v_wallet_account_id;
     END IF;
+
+    -- Derive available balance from single source of truth (wallet ledger summary)
+    SELECT available_balance INTO v_available_balance
+    FROM public.get_seller_wallet_summary(v_store.id);
+    v_available_balance := COALESCE(v_available_balance, 0.00);
 
     -- Money Safety Rule: Payout requests can only use available balance (NOT held balance)
     IF p_amount > v_available_balance THEN
@@ -676,14 +726,9 @@ BEGIN
 
     -- Deduct from available balance and hold for payout
     UPDATE public.wallet_accounts
-    SET available_balance = available_balance - p_amount,
+    SET available_balance = GREATEST(available_balance - p_amount, 0.00),
         updated_at = NOW()
     WHERE id = v_wallet_account_id;
-
-    UPDATE public.seller_stores
-    SET balance = balance - p_amount,
-        updated_at = NOW()
-    WHERE id = v_store.id;
 
     -- Create Payout Request Row
     INSERT INTO public.payout_requests (
@@ -734,7 +779,7 @@ AS $$
 DECLARE
     v_buyer_id UUID;
     v_is_deactivated BOOLEAN;
-    v_order_id UUID;
+    v_order_id TEXT;
     v_order_number TEXT;
     v_normalized_payment_method TEXT;
     v_total_amount NUMERIC(12,2) := 0;
@@ -750,14 +795,18 @@ DECLARE
     v_commission_rate NUMERIC(5,2);
     v_commission_amount NUMERIC(12,2);
     v_seller_earning NUMERIC(12,2);
-    v_existing_order JSONB;
+    v_existing_order RECORD;
     v_buyer_phone TEXT;
     v_shipping_phone TEXT;
     v_is_blacklisted BOOLEAN;
+    v_fingerprint TEXT;
+    v_aggregated_items JSONB;
+    v_variant_sku TEXT;
+    v_variant_stock INT;
 BEGIN
     v_buyer_id := auth.uid();
     IF v_buyer_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required to create order.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Authentication required to create order.';
     END IF;
 
     -- Deactivated Account Gate
@@ -781,44 +830,102 @@ BEGIN
 
     -- Strict Payment Guard: Only Cash on Delivery
     IF p_payment_method IS NULL OR (p_payment_method != 'Cash on Delivery' AND p_payment_method != 'COD') THEN
-        RAISE EXCEPTION 'Online payments are not available yet. Please select Cash on Delivery.' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'Online payments are not available yet. Please select Cash on Delivery.';
     END IF;
     v_normalized_payment_method := 'Cash on Delivery';
 
-    -- Check idempotency
-    SELECT jsonb_build_object('order_id', id, 'order_number', order_number, 'status', status)
+    -- Empty cart guard
+    IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+        RAISE EXCEPTION 'Cart cannot be empty.';
+    END IF;
+
+    -- Aggregate duplicate items by product_id + variant_id
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'product_id', product_id,
+            'variant_id', variant_id,
+            'quantity', total_qty
+        )
+    ) INTO v_aggregated_items
+    FROM (
+        SELECT 
+            (elem->>'product_id')::UUID AS product_id,
+            NULLIF(elem->>'variant_id', '')::UUID AS variant_id,
+            SUM((elem->>'quantity')::INT) AS total_qty
+        FROM jsonb_array_elements(p_items) AS elem
+        GROUP BY 1, 2
+        ORDER BY 1, 2
+    ) sub;
+
+    -- Compute Request Fingerprint
+    v_fingerprint := md5(COALESCE(v_aggregated_items::text, '') || '|' || COALESCE(p_shipping_address::text, '{}') || '|' || p_payment_method);
+
+    -- Check idempotency scoped to caller
+    SELECT id, order_number, status, grand_total, request_fingerprint
     INTO v_existing_order
     FROM public.buyer_orders
-    WHERE idempotency_key = p_idempotency_key;
+    WHERE customer_user_id = v_buyer_id AND idempotency_key = p_idempotency_key;
 
-    IF v_existing_order IS NOT NULL THEN
-        RETURN v_existing_order;
+    IF v_existing_order.id IS NOT NULL THEN
+        IF v_existing_order.request_fingerprint IS NOT NULL AND v_existing_order.request_fingerprint <> v_fingerprint THEN
+            RAISE EXCEPTION 'Idempotency conflict: Key % was already used with a different request payload.', p_idempotency_key USING ERRCODE = 'P0001';
+        END IF;
+
+        RETURN jsonb_build_object(
+            'success', TRUE,
+            'idempotent_reused', TRUE,
+            'order_id', v_existing_order.id,
+            'order_number', v_existing_order.order_number,
+            'status', v_existing_order.status,
+            'grand_total', v_existing_order.grand_total
+        );
     END IF;
 
     v_order_number := 'ORD-' || UPPER(SUBSTRING(gen_random_uuid()::text, 1, 8));
 
     -- Validate items and compute totals
-    FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(product_id UUID, quantity INT)
+    FOR v_item IN SELECT * FROM jsonb_to_recordset(v_aggregated_items) AS x(product_id UUID, variant_id UUID, quantity INT)
     LOOP
         SELECT id, name, sku, regular_price, sale_price, stock_quantity, seller_store_id, is_active, approval_status
         INTO v_product
         FROM public.products
         WHERE id = v_item.product_id FOR UPDATE;
 
-        IF v_product.id IS NULL OR NOT v_product.is_active OR v_product.approval_status != 'approved' THEN
-            RAISE EXCEPTION 'Product % is unavailable or unapproved.', v_item.product_id USING ERRCODE = '22023';
+        IF v_product.id IS NULL OR NOT v_product.is_active OR LOWER(v_product.approval_status) != 'approved' THEN
+            RAISE EXCEPTION 'Product % is unavailable or unapproved.', v_item.product_id;
         END IF;
 
-        IF v_product.stock_quantity < v_item.quantity THEN
-            RAISE EXCEPTION 'Insufficient stock for product %.', v_product.name USING ERRCODE = '22023';
+        IF v_item.variant_id IS NOT NULL THEN
+            SELECT sku, stock_quantity, COALESCE(price_override, v_product.sale_price, v_product.regular_price)
+            INTO v_variant_sku, v_variant_stock, v_unit_price
+            FROM public.product_variants
+            WHERE id = v_item.variant_id AND product_id = v_item.product_id FOR UPDATE;
+
+            IF v_unit_price IS NULL THEN
+                RAISE EXCEPTION 'Invalid or inactive variant % for product %.', v_item.variant_id, v_item.product_id;
+            END IF;
+
+            IF v_variant_stock < v_item.quantity THEN
+                RAISE EXCEPTION 'Insufficient stock for product variant %.', v_variant_sku;
+            END IF;
+
+            UPDATE public.product_variants
+            SET stock_quantity = stock_quantity - v_item.quantity,
+                updated_at = NOW()
+            WHERE id = v_item.variant_id;
+        ELSE
+            IF v_product.stock_quantity < v_item.quantity THEN
+                RAISE EXCEPTION 'Insufficient stock for product %.', v_product.name;
+            END IF;
+
+            UPDATE public.products
+            SET stock_quantity = stock_quantity - v_item.quantity,
+                updated_at = NOW()
+            WHERE id = v_product.id;
+
+            v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
         END IF;
 
-        UPDATE public.products
-        SET stock_quantity = stock_quantity - v_item.quantity,
-            updated_at = NOW()
-        WHERE id = v_product.id;
-
-        v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
         v_line_total := v_unit_price * v_item.quantity;
         v_total_amount := v_total_amount + v_line_total;
     END LOOP;
@@ -844,42 +951,69 @@ BEGIN
 
     -- Insert Order
     INSERT INTO public.buyer_orders (
-        customer_user_id, order_number, status, payment_status, payment_method,
-        total_amount, shipping_fee, voucher_discount, grand_total,
-        shipping_address, customer_notes, idempotency_key
+        id, customer_user_id, order_number, status, payment_status, payment_method,
+        total_amount, subtotal, shipping_fee, voucher_discount, grand_total, amount,
+        shipping_address, customer_notes, idempotency_key, request_fingerprint
     ) VALUES (
-        v_buyer_id, v_order_number, 'Pending', 'Pending', v_normalized_payment_method,
-        v_total_amount, v_shipping_fee, v_voucher_discount, v_grand_total,
-        p_shipping_address, p_notes, p_idempotency_key
+        v_order_number, v_buyer_id, v_order_number, 'Pending', 'Pending', v_normalized_payment_method,
+        v_total_amount, v_total_amount, v_shipping_fee, v_voucher_discount, v_grand_total, v_grand_total,
+        p_shipping_address, p_notes, p_idempotency_key, v_fingerprint
     ) RETURNING id INTO v_order_id;
 
     -- Insert Order Items
-    FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(product_id UUID, quantity INT)
+    FOR v_item IN SELECT * FROM jsonb_to_recordset(v_aggregated_items) AS x(product_id UUID, variant_id UUID, quantity INT)
     LOOP
         SELECT id, name, sku, regular_price, sale_price, seller_store_id INTO v_product
         FROM public.products WHERE id = v_item.product_id;
 
-        v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
+        IF v_item.variant_id IS NOT NULL THEN
+            SELECT sku, COALESCE(price_override, v_product.sale_price, v_product.regular_price)
+            INTO v_variant_sku, v_unit_price
+            FROM public.product_variants WHERE id = v_item.variant_id;
+        ELSE
+            v_variant_sku := v_product.sku;
+            v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
+        END IF;
+
         v_line_total := v_unit_price * v_item.quantity;
-        v_commission_rate := 10.00;
+
+        SELECT COALESCE(commission_rate, 10.00) INTO v_commission_rate
+        FROM public.seller_stores WHERE id = v_product.seller_store_id;
+        v_commission_rate := COALESCE(v_commission_rate, 10.00);
+
         v_commission_amount := (v_line_total * v_commission_rate / 100.0);
         v_seller_earning := v_line_total - v_commission_amount;
 
         INSERT INTO public.order_items (
-            order_id, product_id, seller_store_id, product_name, sku,
+            order_id, product_id, variant_id, seller_store_id, product_name, sku,
             unit_price, quantity, total_price, commission_rate,
             commission_amount, seller_payable
         ) VALUES (
-            v_order_id::text, v_product.id, v_product.seller_store_id, v_product.name, v_product.sku,
+            v_order_id, v_product.id, v_item.variant_id, v_product.seller_store_id, v_product.name, COALESCE(v_variant_sku, v_product.sku, 'SKU-DEFAULT'),
             v_unit_price, v_item.quantity, v_line_total, v_commission_rate,
             v_commission_amount, v_seller_earning
         );
     END LOOP;
 
+    -- Record initial tracking event
+    INSERT INTO public.order_tracking_events (
+        order_id, status, description, location
+    ) VALUES (
+        v_order_id,
+        'Order Placed',
+        'Your order has been placed and will be paid on delivery via Cash on Delivery.',
+        'Apna Store Processing Hub'
+    );
+
     RETURN jsonb_build_object(
+        'success', TRUE,
+        'idempotent_reused', FALSE,
         'order_id', v_order_id,
         'order_number', v_order_number,
         'status', 'Pending',
+        'subtotal', v_total_amount,
+        'shipping_fee', v_shipping_fee,
+        'discount_amount', v_voucher_discount,
         'grand_total', v_grand_total
     );
 END;
@@ -887,13 +1021,15 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 
--- Overload for backwards compatibility
+-- Ensure no conflicting 5-arg overload exists with overlapping defaults
+DROP FUNCTION IF EXISTS public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT);
+
+-- Legacy 4-arg overload (TEXT first) for backward compatibility
 CREATE OR REPLACE FUNCTION public.create_atomic_order(
+    p_idempotency_key TEXT,
     p_items JSONB,
     p_shipping_address JSONB,
-    p_payment_method TEXT,
-    p_idempotency_key TEXT,
-    p_notes TEXT DEFAULT NULL
+    p_payment_method TEXT DEFAULT 'COD'
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -901,13 +1037,24 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
-    RETURN public.create_atomic_order(p_items, p_shipping_address, p_payment_method, p_idempotency_key, p_notes, NULL);
+    IF p_payment_method IN ('JazzCash', 'EasyPaisa', 'Card') THEN
+        RAISE EXCEPTION 'Payment method % is not currently available.', p_payment_method;
+    END IF;
+
+    RETURN public.create_atomic_order(
+        p_items => p_items,
+        p_shipping_address => p_shipping_address,
+        p_payment_method => p_payment_method,
+        p_idempotency_key => p_idempotency_key,
+        p_notes => NULL,
+        p_voucher_code => NULL
+    );
 END;
 $$;
-
-GRANT EXECUTE ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_atomic_order(TEXT, JSONB, JSONB, TEXT) TO authenticated;
 
 -- B. seller_update_product_stock: Gated on deactivated accounts
+DROP FUNCTION IF EXISTS public.seller_update_product_stock(UUID, INT);
 CREATE OR REPLACE FUNCTION public.seller_update_product_stock(
     p_product_id UUID,
     p_new_stock INT
@@ -933,7 +1080,7 @@ BEGIN
     END IF;
 
     IF p_new_stock < 0 THEN
-        RAISE EXCEPTION 'Stock quantity cannot be negative.' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'Stock quantity cannot be negative.';
     END IF;
 
     SELECT seller_store_id INTO v_store_id FROM public.products WHERE id = p_product_id;
@@ -942,7 +1089,7 @@ BEGIN
     END IF;
 
     IF NOT public.owns_seller_store(v_store_id) THEN
-        RAISE EXCEPTION 'Access denied: You do not own the store for this product.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Cannot manage inventory for another seller store.' USING ERRCODE = '42501';
     END IF;
 
     UPDATE public.products
@@ -958,7 +1105,85 @@ GRANT EXECUTE ON FUNCTION public.seller_update_product_stock(UUID, INT) TO authe
 
 -- C. submit_product_review: Gated on deactivated accounts
 CREATE OR REPLACE FUNCTION public.submit_product_review(
-    p_order_id UUID,
+    p_product_id UUID,
+    p_order_item_id UUID,
+    p_rating INT,
+    p_comment TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_buyer_id UUID := auth.uid();
+    v_is_deactivated BOOLEAN;
+    v_order_item RECORD;
+    v_review_id UUID;
+BEGIN
+    IF v_buyer_id IS NULL THEN
+        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+    END IF;
+
+    SELECT is_deactivated INTO v_is_deactivated FROM public.profiles WHERE id = v_buyer_id;
+    IF v_is_deactivated = TRUE THEN
+        RAISE EXCEPTION 'Account is deactivated. Please contact support.' USING ERRCODE = '42501';
+    END IF;
+
+    IF p_rating IS NULL OR p_rating < 1 OR p_rating > 5 THEN
+        RAISE EXCEPTION 'Rating must be an integer between 1 and 5.' USING ERRCODE = '22023';
+    END IF;
+
+    IF p_comment IS NULL OR trim(p_comment) = '' THEN
+        RAISE EXCEPTION 'Review comment cannot be empty.' USING ERRCODE = '22023';
+    END IF;
+
+    SELECT oi.id, oi.order_id, oi.product_id, bo.customer_user_id, bo.status
+    INTO v_order_item
+    FROM public.order_items oi
+    JOIN public.buyer_orders bo ON bo.id = oi.order_id
+    WHERE oi.id = p_order_item_id;
+
+    IF v_order_item.id IS NULL THEN
+        RAISE EXCEPTION 'Order line item % not found.', p_order_item_id USING ERRCODE = 'P0001';
+    END IF;
+
+    IF v_order_item.product_id <> p_product_id THEN
+        RAISE EXCEPTION 'Line item % does not match product %.', p_order_item_id, p_product_id USING ERRCODE = 'P0001';
+    END IF;
+
+    IF v_order_item.customer_user_id <> v_buyer_id THEN
+        RAISE EXCEPTION 'Access denied: You do not own the order associated with line item %.', p_order_item_id USING ERRCODE = 'P0001';
+    END IF;
+
+    IF v_order_item.status <> 'Delivered' THEN
+        RAISE EXCEPTION 'Product reviews are only permitted for Delivered orders (Current status: %).', v_order_item.status USING ERRCODE = '22023';
+    END IF;
+
+    BEGIN
+        INSERT INTO public.product_reviews (
+            product_id, order_item_id, buyer_user_id, rating, comment, is_verified_purchase
+        ) VALUES (
+            p_product_id, p_order_item_id, v_buyer_id, p_rating, p_comment, TRUE
+        ) RETURNING id INTO v_review_id;
+    EXCEPTION WHEN unique_violation THEN
+        RAISE EXCEPTION 'You have already submitted a review for this purchased line item.' USING ERRCODE = 'P0001';
+    END;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'review_id', v_review_id,
+        'rating', p_rating,
+        'comment', p_comment
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.submit_product_review(UUID, UUID, INT, TEXT) TO authenticated;
+
+-- Overload for (p_order_id TEXT, p_product_id UUID, p_rating INT, p_review_text TEXT)
+CREATE OR REPLACE FUNCTION public.submit_product_review(
+    p_order_id TEXT,
     p_product_id UUID,
     p_rating INT,
     p_review_text TEXT DEFAULT NULL
@@ -969,12 +1194,12 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    v_buyer_id UUID;
+    v_buyer_id UUID := auth.uid();
     v_is_deactivated BOOLEAN;
     v_order_status TEXT;
+    v_order_item_id UUID;
     v_review_id UUID;
 BEGIN
-    v_buyer_id := auth.uid();
     IF v_buyer_id IS NULL THEN
         RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
     END IF;
@@ -988,36 +1213,41 @@ BEGIN
         RAISE EXCEPTION 'Rating must be between 1 and 5 stars.' USING ERRCODE = '22023';
     END IF;
 
-    -- Verify order ownership and completion
     SELECT status INTO v_order_status
     FROM public.buyer_orders
-    WHERE id = p_order_id::TEXT AND customer_user_id = v_buyer_id;
+    WHERE id = p_order_id AND customer_user_id = v_buyer_id;
 
     IF v_order_status IS NULL THEN
-        RAISE EXCEPTION 'Order not found or does not belong to authenticated user.' USING ERRCODE = '42501';
+        IF p_order_id ~ '^[0-9a-fA-F-]{36}$' THEN
+            RETURN public.submit_product_review(p_order_id::UUID, p_product_id, p_rating, COALESCE(p_review_text, ''));
+        END IF;
+        RAISE EXCEPTION 'Order not found or does not belong to authenticated user.' USING ERRCODE = 'P0001';
     END IF;
 
     IF v_order_status <> 'Delivered' THEN
         RAISE EXCEPTION 'Reviews can only be submitted for Delivered orders.' USING ERRCODE = '22023';
     END IF;
 
-    -- Insert Review
+    SELECT id INTO v_order_item_id
+    FROM public.order_items
+    WHERE order_id = p_order_id AND product_id = p_product_id
+    LIMIT 1;
+
     INSERT INTO public.product_reviews (
-        product_id, customer_user_id, order_id, rating, review_text
+        product_id, order_item_id, buyer_user_id, rating, comment, is_verified_purchase
     ) VALUES (
-        p_product_id, v_buyer_id, p_order_id, p_rating, p_review_text
+        p_product_id, v_order_item_id, v_buyer_id, p_rating, COALESCE(p_review_text, 'Good product'), TRUE
     )
-    ON CONFLICT (product_id, customer_user_id, order_id)
-    DO UPDATE SET rating = EXCLUDED.rating, review_text = EXCLUDED.review_text, updated_at = NOW()
     RETURNING id INTO v_review_id;
 
     RETURN jsonb_build_object('success', TRUE, 'review_id', v_review_id);
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.submit_product_review(UUID, UUID, INT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_product_review(TEXT, UUID, INT, TEXT) TO authenticated;
 
 -- D. submit_return_request: Gated on deactivated accounts
+DROP FUNCTION IF EXISTS public.submit_return_request(TEXT, UUID, INT, TEXT, TEXT, TEXT[]);
 CREATE OR REPLACE FUNCTION public.submit_return_request(
     p_order_id TEXT,
     p_order_item_id UUID,
@@ -1035,6 +1265,7 @@ DECLARE
     v_buyer_id UUID;
     v_is_deactivated BOOLEAN;
     v_item RECORD;
+    v_already_returned INT := 0;
     v_claim_id UUID;
 BEGIN
     v_buyer_id := auth.uid();
@@ -1066,12 +1297,22 @@ BEGIN
         RAISE EXCEPTION 'Invalid return quantity.' USING ERRCODE = '22023';
     END IF;
 
+    -- Calculate already returned or requested quantity
+    SELECT COALESCE(SUM(quantity), 0) INTO v_already_returned
+    FROM public.return_requests
+    WHERE order_item_id = p_order_item_id
+      AND status NOT IN ('Rejected');
+
+    IF (p_quantity + v_already_returned) > v_item.quantity THEN
+        RAISE EXCEPTION 'Return quantity exceeds eligible purchased quantity. Eligible: %, Requested: %', (v_item.quantity - v_already_returned), p_quantity USING ERRCODE = 'P0001';
+    END IF;
+
     INSERT INTO public.return_requests (
         order_id, order_item_id, seller_store_id, customer_user_id,
         quantity, reason, description, evidence_urls, status
     ) VALUES (
         p_order_id, p_order_item_id, v_item.seller_store_id, v_buyer_id,
-        p_quantity, p_reason, p_description, p_evidence_urls, 'Pending'
+        p_quantity, p_reason, p_description, p_evidence_urls, 'Requested'
     ) RETURNING id INTO v_claim_id;
 
     RETURN jsonb_build_object('success', TRUE, 'claim_id', v_claim_id);
@@ -1081,6 +1322,8 @@ $$;
 GRANT EXECUTE ON FUNCTION public.submit_return_request(TEXT, UUID, INT, TEXT, TEXT, TEXT[]) TO authenticated;
 
 -- E. deactivate_user_account: Normalize SQLSTATE to 42501
+DROP FUNCTION IF EXISTS public.deactivate_user_account(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.deactivate_user_account(UUID);
 CREATE OR REPLACE FUNCTION public.deactivate_user_account(
     p_user_id UUID,
     p_reason TEXT DEFAULT NULL
@@ -1101,6 +1344,15 @@ BEGIN
         RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
     END IF;
 
+    -- Nobody can deactivate the owner role
+    IF EXISTS (
+        SELECT 1 FROM public.user_roles
+        WHERE user_id = p_user_id
+          AND (role = 'owner'::public.app_role OR staff_role = 'owner'::public.admin_staff_role)
+    ) THEN
+        RAISE EXCEPTION 'Deactivation of the Owner role is prohibited.' USING ERRCODE = '42501';
+    END IF;
+
     v_is_owner := EXISTS (
         SELECT 1 FROM public.user_roles
         WHERE user_id = v_caller_id
@@ -1119,7 +1371,7 @@ BEGIN
 
     IF v_caller_id <> p_user_id AND NOT v_is_owner THEN
         IF NOT public.has_permission('customers', 'suspend') THEN
-            RAISE EXCEPTION 'Access denied: Insufficient privileges to deactivate user accounts.' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'Access denied: Cannot deactivate other user accounts without customer suspension privileges.' USING ERRCODE = '42501';
         END IF;
     END IF;
 
@@ -1147,6 +1399,8 @@ $$;
 GRANT EXECUTE ON FUNCTION public.deactivate_user_account(UUID, TEXT) TO authenticated;
 
 -- F. create_chat_room & send_chat_message: Normalize SQLSTATE to 42501
+DROP FUNCTION IF EXISTS public.create_chat_room(UUID, UUID, TEXT);
+DROP FUNCTION IF EXISTS public.create_chat_room(UUID, UUID);
 CREATE OR REPLACE FUNCTION public.create_chat_room(
     p_seller_store_id UUID,
     p_product_id UUID DEFAULT NULL,
@@ -1174,7 +1428,7 @@ BEGIN
     END IF;
 
     IF NOT public.is_approved_active_seller_store(p_seller_store_id) THEN
-        RAISE EXCEPTION 'Store is not active or approved.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Seller store % is unapproved, suspended, or does not exist.', p_seller_store_id USING ERRCODE = '42501';
     END IF;
 
     IF p_order_id IS NOT NULL THEN
@@ -1187,7 +1441,7 @@ BEGIN
         ) INTO v_order_belongs;
 
         IF NOT v_order_belongs THEN
-            RAISE EXCEPTION 'Order does not belong to buyer or does not contain items from this store.' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'Access denied: Order % does not belong to user % or does not contain items from this store.', p_order_id, v_buyer_id USING ERRCODE = '42501';
         END IF;
     END IF;
 
@@ -1206,6 +1460,7 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.create_chat_room(UUID, UUID, TEXT) TO authenticated;
 
+DROP FUNCTION IF EXISTS public.send_chat_message(UUID, TEXT);
 CREATE OR REPLACE FUNCTION public.send_chat_message(
     p_room_id UUID,
     p_message_text TEXT
@@ -1227,6 +1482,14 @@ BEGIN
         RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
     END IF;
 
+    IF p_message_text IS NULL OR length(trim(p_message_text)) = 0 THEN
+        RAISE EXCEPTION 'Message text cannot be empty.' USING ERRCODE = '22023';
+    END IF;
+
+    IF length(p_message_text) > 2000 THEN
+        RAISE EXCEPTION 'Message exceeds maximum length of 2000 characters.' USING ERRCODE = '22023';
+    END IF;
+
     SELECT is_deactivated INTO v_is_deactivated FROM public.profiles WHERE id = v_sender_id;
     IF v_is_deactivated = TRUE THEN
         RAISE EXCEPTION 'Account is deactivated. Please contact support.' USING ERRCODE = '42501';
@@ -1241,7 +1504,7 @@ BEGIN
     END IF;
 
     IF v_room.buyer_user_id <> v_sender_id AND NOT public.owns_seller_store(v_room.seller_store_id) THEN
-        RAISE EXCEPTION 'Access denied: You are not a participant in this chat room.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: You are not a participant in chat room %.', p_room_id USING ERRCODE = '42501';
     END IF;
 
     IF v_room.buyer_user_id = v_sender_id THEN
@@ -1261,7 +1524,7 @@ BEGIN
     IF v_recipient_id IS NOT NULL THEN
         PERFORM public.internal_create_notification(
             v_recipient_id,
-            'NEW_CHAT_MESSAGE',
+            'CHAT_MESSAGE',
             'New message in chat',
             substr(p_message_text, 1, 100),
             jsonb_build_object('room_id', p_room_id, 'message_id', v_message_id)
@@ -1624,7 +1887,7 @@ DROP POLICY IF EXISTS "Public view active approved products; Owners/Admins view 
 CREATE POLICY "Public view active approved products; Owners/Admins view all" ON public.products
     FOR SELECT TO authenticated, anon
     USING (
-        (is_active = TRUE AND approval_status = 'approved')
+        (is_active = TRUE AND LOWER(approval_status) = 'approved' AND public.is_approved_active_seller_store(seller_store_id))
         OR public.owns_seller_store(seller_store_id)
         OR public.has_permission('products', 'view')
     );

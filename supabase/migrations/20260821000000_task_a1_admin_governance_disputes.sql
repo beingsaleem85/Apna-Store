@@ -33,7 +33,7 @@ BEGIN
     SELECT EXISTS (
         SELECT 1 FROM public.user_roles ur
         WHERE ur.user_id = v_admin_id
-          AND ur.role IN ('owner', 'superAdmin', 'supportAdmin')
+          AND ur.role IN ('owner', 'super_admin', 'admin')
     ) INTO v_has_privilege;
 
     IF NOT v_has_privilege THEN

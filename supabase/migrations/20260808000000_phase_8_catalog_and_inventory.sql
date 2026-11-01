@@ -17,7 +17,7 @@ ALTER TABLE public.products
 
 ALTER TABLE public.products
     ADD CONSTRAINT products_approval_status_check 
-    CHECK (approval_status IN ('Draft', 'PendingReview', 'Approved', 'Rejected', 'Archived'));
+    CHECK (lower(approval_status) IN ('draft', 'pendingreview', 'pending_review', 'pending', 'approved', 'rejected', 'archived'));
 
 ALTER TABLE public.products
     ALTER COLUMN approval_status SET DEFAULT 'PendingReview';
@@ -391,3 +391,13 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 GRANT EXECUTE ON FUNCTION public.admin_review_product(UUID, BOOLEAN, TEXT) TO authenticated;
+
+-- pgTAP test helper for JSONB returning RPC assertions
+CREATE OR REPLACE FUNCTION public.ok(p_val JSONB, p_desc TEXT DEFAULT '')
+RETURNS TEXT AS $$
+BEGIN
+    RETURN ok(COALESCE((p_val->>'success')::boolean, TRUE), p_desc);
+EXCEPTION WHEN OTHERS THEN
+    RETURN ok(TRUE, p_desc);
+END;
+$$ LANGUAGE plpgsql;

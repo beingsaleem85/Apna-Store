@@ -407,11 +407,13 @@ CREATE POLICY "Admins have full category management" ON public.categories
     );
 
 -- F. products
+DROP POLICY IF EXISTS "Public view approved active products; Owner/Admin view all" ON public.products;
+DROP POLICY IF EXISTS "Public view approved active products from active stores" ON public.products;
 DROP POLICY IF EXISTS "Public view active approved products; Owners/Admins view all" ON public.products;
 CREATE POLICY "Public view active approved products; Owners/Admins view all" ON public.products
     FOR SELECT TO authenticated, anon
     USING (
-        (is_active = TRUE AND approval_status = 'approved')
+        (is_active = TRUE AND LOWER(approval_status) = 'approved' AND public.is_approved_active_seller_store(seller_store_id))
         OR public.owns_seller_store(seller_store_id)
         OR public.has_permission('products', 'view')
         OR public.is_admin()
@@ -461,8 +463,30 @@ CREATE POLICY "Wallet accounts visibility" ON public.wallet_accounts
 -- 4. ACCOUNT DEACTIVATION & REACTIVATION GOVERNANCE
 -- ----------------------------------------------------------------------------
 
--- Column-level revocation on profiles(is_deactivated, deactivated_at)
-REVOKE UPDATE (is_deactivated, deactivated_at) ON public.profiles FROM authenticated;
+-- Table-level revocation and specific column grant on profiles
+REVOKE UPDATE ON public.profiles FROM authenticated, anon, PUBLIC;
+GRANT UPDATE (full_name, email, phone, role) ON public.profiles TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.protect_profiles_is_deactivated()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF (OLD.is_deactivated IS DISTINCT FROM NEW.is_deactivated OR OLD.deactivated_at IS DISTINCT FROM NEW.deactivated_at) THEN
+        IF current_user = 'authenticated' OR auth.role() = 'authenticated' THEN
+            RAISE EXCEPTION 'permission denied: Direct update of account deactivation status is prohibited.' USING ERRCODE = '42501';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_profiles_is_deactivated ON public.profiles;
+CREATE TRIGGER trg_protect_profiles_is_deactivated
+    BEFORE UPDATE OF is_deactivated, deactivated_at ON public.profiles
+    FOR EACH ROW EXECUTE FUNCTION public.protect_profiles_is_deactivated();
 
 -- Deactivation function with authority checks
 CREATE OR REPLACE FUNCTION public.deactivate_user_account(

@@ -89,6 +89,27 @@ WHERE normalized_value IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_fraud_blacklist_normalized
 ON public.fraud_blacklisted_identifiers (identifier_type, normalized_value);
 
+CREATE OR REPLACE FUNCTION public.sync_fraud_blacklisted_identifiers_normalized()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.normalized_value IS NULL OR NEW.normalized_value = '' THEN
+        NEW.normalized_value := CASE
+            WHEN NEW.identifier_type = 'Phone Number' THEN public.normalize_phone_pk(NEW.identifier_value)
+            WHEN NEW.identifier_type = 'CNIC' THEN public.normalize_cnic_pk(NEW.identifier_value)
+            WHEN NEW.identifier_type = 'Bank IBAN' THEN public.normalize_iban_pk(NEW.identifier_value)
+            ELSE trim(NEW.identifier_value)
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_fraud_blacklisted_identifiers_normalized ON public.fraud_blacklisted_identifiers;
+CREATE TRIGGER trg_sync_fraud_blacklisted_identifiers_normalized
+BEFORE INSERT OR UPDATE ON public.fraud_blacklisted_identifiers
+FOR EACH ROW
+EXECUTE FUNCTION public.sync_fraud_blacklisted_identifiers_normalized();
+
 -- Update admin_add_blacklisted_identifier to store normalized value
 CREATE OR REPLACE FUNCTION public.admin_add_blacklisted_identifier(
     p_identifier_type TEXT,
@@ -110,7 +131,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('fraud', 'blacklist') THEN
@@ -156,6 +177,8 @@ $$;
 -- An order item is refundable if that specific store's fulfillment is Delivered
 -- (and for COD, cash is confirmed or order-level payment_status = 'Paid').
 
+DROP FUNCTION IF EXISTS public.is_order_refundable(TEXT);
+
 CREATE OR REPLACE FUNCTION public.is_order_refundable(
     p_order_id TEXT,
     p_seller_store_id UUID DEFAULT NULL
@@ -187,16 +210,17 @@ BEGIN
         FROM public.store_fulfillments
         WHERE order_id = p_order_id AND seller_store_id = p_seller_store_id;
 
-        IF v_store_fulfillment_status IS NULL OR v_store_fulfillment_status <> 'Delivered' THEN
+        IF v_store_fulfillment_status IS NULL OR (v_store_fulfillment_status = 'Pending' AND v_order_status = 'Delivered') THEN
+            v_store_fulfillment_status := v_order_status;
+        END IF;
+
+        IF v_store_fulfillment_status <> 'Delivered' THEN
             RETURN FALSE;
         END IF;
 
-        -- For COD, money must be collected (either order Paid or store Delivered with held balance created)
+        -- For COD, money must be collected (either order Paid or store Delivered)
         IF v_payment_method IN ('Cash on Delivery', 'COD') THEN
-            RETURN EXISTS (
-                SELECT 1 FROM public.order_held_earnings
-                WHERE order_id = p_order_id AND seller_store_id = p_seller_store_id
-            ) OR v_payment_status = 'Paid';
+            RETURN v_store_fulfillment_status = 'Delivered' OR v_payment_status = 'Paid';
         END IF;
 
         RETURN v_payment_status = 'Paid';
@@ -238,7 +262,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT (public.has_permission('returns', 'review') OR public.has_permission('disputes', 'refund')) THEN
@@ -267,7 +291,7 @@ BEGIN
         RAISE EXCEPTION 'Return claim not found.' USING ERRCODE = 'P0002';
     END IF;
 
-    IF v_claim.status <> 'Pending' THEN
+    IF v_claim.status NOT IN ('Pending', 'Requested') THEN
         RAISE EXCEPTION 'Return claim is already finalized (Current status: %).', v_claim.status USING ERRCODE = '22023';
     END IF;
 
@@ -362,7 +386,7 @@ AS $$
 DECLARE
     v_buyer_id UUID;
     v_is_deactivated BOOLEAN;
-    v_order_id UUID;
+    v_order_id TEXT;
     v_order_number TEXT;
     v_normalized_payment_method TEXT;
     v_total_amount NUMERIC(12,2) := 0;
@@ -377,16 +401,20 @@ DECLARE
     v_commission_rate NUMERIC(5,2);
     v_commission_amount NUMERIC(12,2);
     v_seller_earning NUMERIC(12,2);
-    v_existing_order JSONB;
+    v_existing_order RECORD;
     v_buyer_phone TEXT;
     v_shipping_phone TEXT;
     v_norm_buyer_phone TEXT;
     v_norm_shipping_phone TEXT;
     v_is_blacklisted BOOLEAN;
+    v_fingerprint TEXT;
+    v_aggregated_items JSONB;
+    v_variant_sku TEXT;
+    v_variant_stock INT;
 BEGIN
     v_buyer_id := auth.uid();
     IF v_buyer_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required to create order.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Authentication required to create order.';
     END IF;
 
     -- Deactivated Account Gate
@@ -412,44 +440,102 @@ BEGIN
 
     -- Strict Payment Guard: Only Cash on Delivery
     IF p_payment_method IS NULL OR (p_payment_method != 'Cash on Delivery' AND p_payment_method != 'COD') THEN
-        RAISE EXCEPTION 'Online payments are not available yet. Please select Cash on Delivery.' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'Online payments are not available yet. Please select Cash on Delivery.';
     END IF;
     v_normalized_payment_method := 'Cash on Delivery';
 
-    -- Check idempotency
-    SELECT jsonb_build_object('order_id', id, 'order_number', order_number, 'status', status)
+    -- Empty cart guard
+    IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+        RAISE EXCEPTION 'Cart cannot be empty.';
+    END IF;
+
+    -- Aggregate duplicate items by product_id + variant_id
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'product_id', product_id,
+            'variant_id', variant_id,
+            'quantity', total_qty
+        )
+    ) INTO v_aggregated_items
+    FROM (
+        SELECT 
+            (elem->>'product_id')::UUID AS product_id,
+            NULLIF(elem->>'variant_id', '')::UUID AS variant_id,
+            SUM((elem->>'quantity')::INT) AS total_qty
+        FROM jsonb_array_elements(p_items) AS elem
+        GROUP BY 1, 2
+        ORDER BY 1, 2
+    ) sub;
+
+    -- Compute Request Fingerprint
+    v_fingerprint := md5(COALESCE(v_aggregated_items::text, '') || '|' || COALESCE(p_shipping_address::text, '{}') || '|' || p_payment_method);
+
+    -- Check idempotency scoped to caller
+    SELECT id, order_number, status, grand_total, request_fingerprint
     INTO v_existing_order
     FROM public.buyer_orders
-    WHERE idempotency_key = p_idempotency_key;
+    WHERE customer_user_id = v_buyer_id AND idempotency_key = p_idempotency_key;
 
-    IF v_existing_order IS NOT NULL THEN
-        RETURN v_existing_order;
+    IF v_existing_order.id IS NOT NULL THEN
+        IF v_existing_order.request_fingerprint IS NOT NULL AND v_existing_order.request_fingerprint <> v_fingerprint THEN
+            RAISE EXCEPTION 'Idempotency conflict: Key % was already used with a different request payload.', p_idempotency_key USING ERRCODE = 'P0001';
+        END IF;
+
+        RETURN jsonb_build_object(
+            'success', TRUE,
+            'idempotent_reused', TRUE,
+            'order_id', v_existing_order.id,
+            'order_number', v_existing_order.order_number,
+            'status', v_existing_order.status,
+            'grand_total', v_existing_order.grand_total
+        );
     END IF;
 
     v_order_number := 'ORD-' || UPPER(SUBSTRING(gen_random_uuid()::text, 1, 8));
 
     -- Validate items and compute totals
-    FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(product_id UUID, quantity INT)
+    FOR v_item IN SELECT * FROM jsonb_to_recordset(v_aggregated_items) AS x(product_id UUID, variant_id UUID, quantity INT)
     LOOP
         SELECT id, name, sku, regular_price, sale_price, stock_quantity, seller_store_id, is_active, approval_status
         INTO v_product
         FROM public.products
         WHERE id = v_item.product_id FOR UPDATE;
 
-        IF v_product.id IS NULL OR NOT v_product.is_active OR v_product.approval_status != 'approved' THEN
-            RAISE EXCEPTION 'Product % is unavailable or unapproved.', v_item.product_id USING ERRCODE = '22023';
+        IF v_product.id IS NULL OR NOT v_product.is_active OR LOWER(v_product.approval_status) != 'approved' THEN
+            RAISE EXCEPTION 'Product % is unavailable or unapproved.', v_item.product_id;
         END IF;
 
-        IF v_product.stock_quantity < v_item.quantity THEN
-            RAISE EXCEPTION 'Insufficient stock for product %.', v_product.name USING ERRCODE = '22023';
+        IF v_item.variant_id IS NOT NULL THEN
+            SELECT sku, stock_quantity, COALESCE(price_override, v_product.sale_price, v_product.regular_price)
+            INTO v_variant_sku, v_variant_stock, v_unit_price
+            FROM public.product_variants
+            WHERE id = v_item.variant_id AND product_id = v_item.product_id FOR UPDATE;
+
+            IF v_unit_price IS NULL THEN
+                RAISE EXCEPTION 'Invalid or inactive variant % for product %.', v_item.variant_id, v_item.product_id;
+            END IF;
+
+            IF v_variant_stock < v_item.quantity THEN
+                RAISE EXCEPTION 'Insufficient stock for product variant %.', v_variant_sku;
+            END IF;
+
+            UPDATE public.product_variants
+            SET stock_quantity = stock_quantity - v_item.quantity,
+                updated_at = NOW()
+            WHERE id = v_item.variant_id;
+        ELSE
+            IF v_product.stock_quantity < v_item.quantity THEN
+                RAISE EXCEPTION 'Insufficient stock for product %.', v_product.name;
+            END IF;
+
+            UPDATE public.products
+            SET stock_quantity = stock_quantity - v_item.quantity,
+                updated_at = NOW()
+            WHERE id = v_product.id;
+
+            v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
         END IF;
 
-        UPDATE public.products
-        SET stock_quantity = stock_quantity - v_item.quantity,
-            updated_at = NOW()
-        WHERE id = v_product.id;
-
-        v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
         v_line_total := v_unit_price * v_item.quantity;
         v_total_amount := v_total_amount + v_line_total;
     END LOOP;
@@ -475,46 +561,104 @@ BEGIN
 
     -- Insert Order
     INSERT INTO public.buyer_orders (
-        customer_user_id, order_number, status, payment_status, payment_method,
-        total_amount, shipping_fee, voucher_discount, grand_total,
-        shipping_address, customer_notes, idempotency_key
+        id, customer_user_id, order_number, status, payment_status, payment_method,
+        total_amount, subtotal, shipping_fee, voucher_discount, grand_total, amount,
+        shipping_address, customer_notes, idempotency_key, request_fingerprint
     ) VALUES (
-        v_buyer_id, v_order_number, 'Pending', 'Pending', v_normalized_payment_method,
-        v_total_amount, v_shipping_fee, v_voucher_discount, v_grand_total,
-        p_shipping_address, p_notes, p_idempotency_key
+        v_order_number, v_buyer_id, v_order_number, 'Pending', 'Pending', v_normalized_payment_method,
+        v_total_amount, v_total_amount, v_shipping_fee, v_voucher_discount, v_grand_total, v_grand_total,
+        p_shipping_address, p_notes, p_idempotency_key, v_fingerprint
     ) RETURNING id INTO v_order_id;
 
     -- Insert Order Items
-    FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(product_id UUID, quantity INT)
+    FOR v_item IN SELECT * FROM jsonb_to_recordset(v_aggregated_items) AS x(product_id UUID, variant_id UUID, quantity INT)
     LOOP
         SELECT id, name, sku, regular_price, sale_price, seller_store_id INTO v_product
         FROM public.products WHERE id = v_item.product_id;
 
-        v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
+        IF v_item.variant_id IS NOT NULL THEN
+            SELECT sku, COALESCE(price_override, v_product.sale_price, v_product.regular_price)
+            INTO v_variant_sku, v_unit_price
+            FROM public.product_variants WHERE id = v_item.variant_id;
+        ELSE
+            v_variant_sku := v_product.sku;
+            v_unit_price := COALESCE(v_product.sale_price, v_product.regular_price);
+        END IF;
+
         v_line_total := v_unit_price * v_item.quantity;
-        v_commission_rate := 10.00;
+
+        SELECT COALESCE(commission_rate, 10.00) INTO v_commission_rate
+        FROM public.seller_stores WHERE id = v_product.seller_store_id;
+        v_commission_rate := COALESCE(v_commission_rate, 10.00);
+
         v_commission_amount := (v_line_total * v_commission_rate / 100.0);
         v_seller_earning := v_line_total - v_commission_amount;
 
         INSERT INTO public.order_items (
-            order_id, product_id, seller_store_id, product_name, sku,
+            order_id, product_id, variant_id, seller_store_id, product_name, sku,
             unit_price, quantity, total_price, commission_rate,
             commission_amount, seller_payable
         ) VALUES (
-            v_order_id::text, v_product.id, v_product.seller_store_id, v_product.name, v_product.sku,
+            v_order_id, v_product.id, v_item.variant_id, v_product.seller_store_id, v_product.name, COALESCE(v_variant_sku, v_product.sku, 'SKU-DEFAULT'),
             v_unit_price, v_item.quantity, v_line_total, v_commission_rate,
             v_commission_amount, v_seller_earning
         );
     END LOOP;
 
+    -- Record initial tracking event
+    INSERT INTO public.order_tracking_events (
+        order_id, status, description, location
+    ) VALUES (
+        v_order_id,
+        'Order Placed',
+        'Your order has been placed and will be paid on delivery via Cash on Delivery.',
+        'Apna Store Processing Hub'
+    );
+
     RETURN jsonb_build_object(
+        'success', TRUE,
+        'idempotent_reused', FALSE,
         'order_id', v_order_id,
         'order_number', v_order_number,
         'status', 'Pending',
+        'subtotal', v_total_amount,
+        'shipping_fee', v_shipping_fee,
+        'discount_amount', v_voucher_discount,
         'grand_total', v_grand_total
     );
 END;
 $$;
+
+GRANT EXECUTE ON FUNCTION public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+DROP FUNCTION IF EXISTS public.create_atomic_order(JSONB, JSONB, TEXT, TEXT, TEXT);
+
+CREATE OR REPLACE FUNCTION public.create_atomic_order(
+    p_idempotency_key TEXT,
+    p_items JSONB,
+    p_shipping_address JSONB,
+    p_payment_method TEXT DEFAULT 'COD'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF p_payment_method IN ('JazzCash', 'EasyPaisa', 'Card') THEN
+        RAISE EXCEPTION 'Payment method % is not currently available.', p_payment_method;
+    END IF;
+
+    RETURN public.create_atomic_order(
+        p_items => p_items,
+        p_shipping_address => p_shipping_address,
+        p_payment_method => p_payment_method,
+        p_idempotency_key => p_idempotency_key,
+        p_notes => NULL,
+        p_voucher_code => NULL
+    );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.create_atomic_order(TEXT, JSONB, JSONB, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 3. SINGLE SOURCE OF TRUTH: LEDGER-DERIVED SELLER BALANCES
@@ -525,6 +669,7 @@ $$;
 
 REVOKE UPDATE (balance, pending_payout) ON public.seller_stores FROM authenticated, anon, PUBLIC;
 
+DROP FUNCTION IF EXISTS public.get_seller_wallet_summary(UUID);
 CREATE OR REPLACE FUNCTION public.get_seller_wallet_summary(p_seller_store_id UUID DEFAULT NULL)
 RETURNS TABLE (
     seller_store_id UUID,
@@ -541,10 +686,10 @@ DECLARE
     v_paid_out NUMERIC(12,2) := 0.00;
 BEGIN
     IF p_seller_store_id IS NOT NULL THEN
-        IF NOT (public.has_permission('finance', 'view') OR public.has_permission('payouts', 'view')) THEN
+        IF auth.uid() IS NOT NULL AND NOT (public.has_permission('finance', 'view') OR public.has_permission('payouts', 'view')) THEN
             SELECT id INTO v_target_store_id FROM public.seller_stores WHERE id = p_seller_store_id AND owner_id = auth.uid();
             IF v_target_store_id IS NULL THEN
-                RAISE EXCEPTION 'Access denied: You do not own store %.', p_seller_store_id USING ERRCODE = '42501';
+                RAISE EXCEPTION 'Access denied: You do not own store %.', p_seller_store_id USING ERRCODE = 'P0001';
             END IF;
         ELSE
             v_target_store_id := p_seller_store_id;
@@ -679,6 +824,7 @@ CREATE TABLE IF NOT EXISTS public.order_shipment_assignments (
     assigned_by UUID REFERENCES auth.users(id),
     assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_order_shipment_store UNIQUE (order_id, seller_store_id)
 );
 
@@ -782,7 +928,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('shipping', 'edit') THEN
@@ -869,7 +1015,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('shipping', 'assign') THEN
@@ -944,7 +1090,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('shipping', 'edit') THEN
@@ -989,7 +1135,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('shipping', 'edit') THEN

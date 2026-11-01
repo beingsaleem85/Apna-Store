@@ -62,8 +62,7 @@ INSERT INTO public.role_permissions (role, module, action) VALUES
     ('seller'::public.app_role, 'store', 'manage'),
     ('seller'::public.app_role, 'products', 'create'),
     ('seller'::public.app_role, 'kyc', 'submit'),
-    ('buyer'::public.app_role, 'orders', 'create'),
-    ('buyer'::public.app_role, 'products', 'view')
+    ('buyer'::public.app_role, 'orders', 'create')
 ON CONFLICT (role, module, action) DO NOTHING;
 
 -- ----------------------------------------------------------------------------

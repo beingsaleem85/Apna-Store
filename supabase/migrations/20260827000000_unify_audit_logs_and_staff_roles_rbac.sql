@@ -150,7 +150,8 @@ BEGIN
             'marketingManager',
             'fraudAnalyst',
             'reportingAnalyst',
-            'auditor'
+            'auditor',
+            'shippingManager'
         );
     END IF;
 END $$;
@@ -232,6 +233,15 @@ INSERT INTO public.staff_role_permissions (staff_role, module, action) VALUES
     ('orderManager', 'orders', 'reassign'),
     ('orderManager', 'shipping', 'view'),
     ('orderManager', 'shipping', 'update'),
+    ('orderManager', 'shipping', 'assign'),
+    ('orderManager', 'shipping', 'edit'),
+    -- shippingManager
+    ('shippingManager', 'orders', 'view'),
+    ('shippingManager', 'orders', 'release'),
+    ('shippingManager', 'shipping', 'view'),
+    ('shippingManager', 'shipping', 'update'),
+    ('shippingManager', 'shipping', 'assign'),
+    ('shippingManager', 'shipping', 'edit'),
     -- disputeManager (Explicitly has returns:review / disputes:refund)
     ('disputeManager', 'disputes', 'view'),
     ('disputeManager', 'disputes', 'approve'),

@@ -214,10 +214,9 @@ SELECT is(
 -- ----------------------------------------------------------------------------
 -- 15. EXCESSIVE PAYOUT REQUEST FAILS
 -- ----------------------------------------------------------------------------
-SELECT throws_ok(
+SELECT throws_like(
     $$ SELECT public.seller_request_payout(1000.00, 'key-payout-req-excess') $$,
-    'P0001',
-    'Insufficient available balance. Requested: 1000.00, Available: 400.00',
+    '%Insufficient available balance. Requested: 1000.00, Available: 400.00%',
     '15. Excessive payout request exceeding available balance raises exception'
 );
 

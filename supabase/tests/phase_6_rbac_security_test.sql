@@ -69,7 +69,7 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
     $$ SELECT public.admin_adjust_seller_wallet('11111111-1111-1111-1111-111111111111', 5000.00, 'Malicious credit attempt') $$,
-    'P0001',
+    '42501',
     NULL,
     '3. Non-admin buyer calling admin_adjust_seller_wallet throws access denied exception'
 );
@@ -101,7 +101,7 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
     $$ SELECT public.admin_review_product('33333333-3333-3333-3333-333333333333', TRUE) $$,
-    'P0001',
+    '42501',
     NULL,
     '6. Seller calling admin_review_product on owned product throws self-approval exception'
 );

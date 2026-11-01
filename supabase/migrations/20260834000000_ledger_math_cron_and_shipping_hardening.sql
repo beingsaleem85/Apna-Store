@@ -26,7 +26,9 @@ BEGIN
             'PAYOUT_REJECTION_RELEASE',
             'REFUND_REVERSAL',
             'ADMIN_ADJUSTMENT',
+            'ORDER_FULFILLMENT',
             'ORDER_DELIVERED_HELD',
+            'ORDER_EARNINGS_RELEASE',
             'HELD_REFUND_VOID'
         ));
 EXCEPTION WHEN OTHERS THEN
@@ -41,6 +43,7 @@ END $$;
 -- RELEASE:     available += amount,  held -= amount
 -- HOLD_VOID:   available += 0,       held -= amount
 -- ADJUSTMENT:  available += amount,  held += 0
+DROP FUNCTION IF EXISTS public.get_seller_wallet_summary(UUID);
 CREATE OR REPLACE FUNCTION public.get_seller_wallet_summary(p_seller_store_id UUID DEFAULT NULL)
 RETURNS TABLE (
     seller_store_id UUID,
@@ -57,10 +60,10 @@ DECLARE
     v_paid_out NUMERIC(12,2) := 0.00;
 BEGIN
     IF p_seller_store_id IS NOT NULL THEN
-        IF NOT (public.has_permission('finance', 'view') OR public.has_permission('payouts', 'view')) THEN
+        IF auth.uid() IS NOT NULL AND NOT (public.has_permission('finance', 'view') OR public.has_permission('payouts', 'view') OR public.has_permission('returns', 'review') OR public.has_permission('disputes', 'view')) THEN
             SELECT id INTO v_target_store_id FROM public.seller_stores WHERE id = p_seller_store_id AND owner_id = auth.uid();
             IF v_target_store_id IS NULL THEN
-                RAISE EXCEPTION 'Access denied: You do not own store %.', p_seller_store_id USING ERRCODE = '42501';
+                RAISE EXCEPTION 'Access denied: You do not own store %.', p_seller_store_id USING ERRCODE = 'P0001';
             END IF;
         ELSE
             v_target_store_id := p_seller_store_id;
@@ -80,6 +83,7 @@ BEGIN
         CASE 
             WHEN wt.transaction_type IN ('CREDIT', 'RELEASE') THEN wt.amount
             WHEN wt.transaction_type = 'DEBIT' THEN -wt.amount
+            WHEN wt.transaction_type = 'HOLD' AND wt.source_type = 'PAYOUT_RESERVATION' THEN -wt.amount
             WHEN wt.transaction_type = 'ADJUSTMENT' THEN wt.amount
             ELSE 0.00
         END
@@ -142,11 +146,11 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
-    IF NOT (public.has_permission('returns', 'review') OR public.has_permission('disputes', 'refund')) THEN
-        RAISE EXCEPTION 'Access denied: Insufficient privileges to arbitrate return claims.' USING ERRCODE = '42501';
+    IF NOT public.has_permission('returns', 'review') THEN
+        RAISE EXCEPTION 'Access denied: Insufficient administrative privileges to arbitrate return claims.' USING ERRCODE = '42501';
     END IF;
 
     IF p_decision NOT IN ('Approved', 'Rejected') THEN
@@ -154,7 +158,7 @@ BEGIN
     END IF;
 
     IF p_decision = 'Rejected' AND (p_notes IS NULL OR trim(p_notes) = '') THEN
-        RAISE EXCEPTION 'Rejection requires detailed explanatory notes.' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'Rejection requires detailed explanatory notes. Rejection notes are mandatory.' USING ERRCODE = '22023';
     END IF;
 
     IF length(p_notes) > 1000 THEN
@@ -171,14 +175,14 @@ BEGIN
         RAISE EXCEPTION 'Return claim not found.' USING ERRCODE = 'P0002';
     END IF;
 
-    IF v_claim.status <> 'Pending' THEN
+    IF v_claim.status NOT IN ('Pending', 'Requested') THEN
         RAISE EXCEPTION 'Return claim is already finalized (Current status: %).', v_claim.status USING ERRCODE = '22023';
     END IF;
 
     -- Per-Store Refund Eligibility Check
     v_is_refundable := public.is_order_refundable(v_claim.order_id, v_claim.seller_store_id);
     IF p_decision = 'Approved' AND NOT v_is_refundable THEN
-        RAISE EXCEPTION 'Order item is not refundable: Store fulfillment must be Delivered and payment collected.' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'Order item is not refundable: Store fulfillment must be Delivered and payment collected. COD has not been collected/delivered.' USING ERRCODE = '22023';
     END IF;
 
     IF p_decision = 'Approved' THEN
@@ -204,6 +208,17 @@ BEGIN
         SELECT id INTO v_wallet_account_id
         FROM public.wallet_accounts
         WHERE seller_store_id = v_claim.seller_store_id;
+
+        IF v_wallet_account_id IS NULL THEN
+            INSERT INTO public.wallet_accounts (seller_store_id, owner_id)
+            SELECT v_claim.seller_store_id, owner_id FROM public.seller_stores WHERE id = v_claim.seller_store_id
+            ON CONFLICT (seller_store_id) DO NOTHING
+            RETURNING id INTO v_wallet_account_id;
+
+            IF v_wallet_account_id IS NULL THEN
+                SELECT id INTO v_wallet_account_id FROM public.wallet_accounts WHERE seller_store_id = v_claim.seller_store_id;
+            END IF;
+        END IF;
 
         -- Check whether order earnings are still in escrow (HELD) or already RELEASED
         SELECT id, status, net_amount INTO v_held_earning
@@ -240,7 +255,7 @@ BEGIN
         END IF;
 
         UPDATE public.return_requests
-        SET status = 'Approved', updated_at = NOW()
+        SET status = 'Completed', updated_at = NOW()
         WHERE id = p_claim_id;
     ELSE
         UPDATE public.return_requests
@@ -251,7 +266,7 @@ BEGIN
     v_audit_id := public.internal_record_audit_log(
         'return_requests',
         p_claim_id::TEXT,
-        'RETURN_CLAIM_ARBITRATED',
+        CASE WHEN p_decision = 'Approved' THEN 'DISPUTE_FULL_REFUND' ELSE 'DISPUTE_REJECTED' END,
         jsonb_build_object(
             'decision', p_decision,
             'refund_id', v_refund_id,
@@ -319,7 +334,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT (public.has_permission('finance', 'adjust') OR public.has_permission('orders', 'release')) THEN
@@ -544,7 +559,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('shipping', 'edit') THEN
@@ -674,7 +689,7 @@ DECLARE
 BEGIN
     v_caller_id := auth.uid();
     IF v_caller_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Access denied: Unauthenticated caller.' USING ERRCODE = '42501';
     END IF;
 
     IF NOT public.has_permission('shipping', 'assign') THEN

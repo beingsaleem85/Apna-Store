@@ -3,7 +3,7 @@
 -- ============================================================================
 
 BEGIN;
-SELECT plan(37);
+SELECT plan(42);
 
 -- ----------------------------------------------------------------------------
 -- 0. SEED TEST FIXTURES & USERS
@@ -62,6 +62,10 @@ INSERT INTO public.wallet_accounts (id, seller_store_id, owner_id, currency, ava
     ('92222222-0000-0000-0000-000000000002', '91111111-0000-0000-0000-000000000002', '90000000-0000-0000-0000-000000000003', 'PKR', 0.00, 0.00)
 ON CONFLICT (seller_store_id) DO UPDATE SET available_balance = EXCLUDED.available_balance, held_balance = EXCLUDED.held_balance;
 
+INSERT INTO public.wallet_transactions (wallet_account_id, seller_store_id, transaction_type, amount, source_type, source_id, idempotency_key, description, created_by) VALUES
+    ('92222222-0000-0000-0000-000000000001', '91111111-0000-0000-0000-000000000001', 'CREDIT', 500.00, 'ORDER_FULFILLMENT', 'SEED-ORD-M32', 'SEED-WT-ALPHA-M32', 'Initial balance', '90000000-0000-0000-0000-000000000002')
+ON CONFLICT DO NOTHING;
+
 -- Seed Products
 INSERT INTO public.products (id, seller_store_id, name, sku, regular_price, stock_quantity, is_active, approval_status) VALUES
     ('93333333-0000-0000-0000-000000000001', '91111111-0000-0000-0000-000000000001', 'Product Alpha', 'SKU-ALP-01', 1000.00, 50, TRUE, 'approved'),
@@ -84,6 +88,19 @@ INSERT INTO public.store_fulfillments (order_id, seller_store_id, fulfillment_st
     ('ORD-MULTI-M32', '91111111-0000-0000-0000-000000000001', 'Processing', FALSE),
     ('ORD-MULTI-M32', '91111111-0000-0000-0000-000000000002', 'Processing', FALSE)
 ON CONFLICT (order_id, seller_store_id) DO UPDATE SET fulfillment_status = EXCLUDED.fulfillment_status;
+
+-- Seed KYC Documents, Categories, Vouchers for RLS tests
+INSERT INTO public.seller_kyc_documents (id, seller_store_id, document_type, document_url, cnic_number, status) VALUES
+    ('96666666-0000-0000-0000-000000000001', '91111111-0000-0000-0000-000000000001', 'CNIC_FRONT', 'https://example.com/kyc/cnic_front.pdf', '35201-1111111-1', 'Pending')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.categories (id, name, slug, is_active) VALUES
+    ('97777777-0000-0000-0000-000000000001', 'Inactive Category M32', 'inactive-cat-m32', FALSE)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.platform_vouchers (id, code, discount_type, discount_value, min_order_amount, is_active, start_date, end_date) VALUES
+    ('98888888-0000-0000-0000-000000000001', 'VOUCHER-M32', 'percentage', 10.00, 500.00, TRUE, NOW() - INTERVAL '1 day', NOW() + INTERVAL '10 days')
+ON CONFLICT (id) DO NOTHING;
 
 -- ----------------------------------------------------------------------------
 -- PART 1: FULFILLMENT MONEY SAFETY & ESCROW HELD BALANCES (TESTS 1 - 12)
@@ -277,7 +294,7 @@ SELECT throws_ok(
 
 -- Test 17: submit_product_review
 SELECT throws_ok(
-    $$SELECT public.submit_product_review('ORD-MULTI-M32'::uuid, '93333333-0000-0000-0000-000000000001'::uuid, 5, 'Great!')$$,
+    $$SELECT public.submit_product_review('ORD-MULTI-M32', '93333333-0000-0000-0000-000000000001'::uuid, 5, 'Great!')$$,
     '42501',
     'Account is deactivated. Please contact support.',
     'Test 17: Deactivated user rejected from submit_product_review'
@@ -371,10 +388,6 @@ SELECT is(
 );
 
 -- Table 4: seller_kyc_documents
-INSERT INTO public.seller_kyc_documents (id, seller_store_id, cnic_number, status) VALUES
-    ('96666666-0000-0000-0000-000000000001', '91111111-0000-0000-0000-000000000001', '35201-1111111-1', 'pending')
-ON CONFLICT (id) DO NOTHING;
-
 -- Positive: sellerManager (has kyc:view) views KYC documents
 SET LOCAL request.jwt.claims = '{"sub": "90000000-0000-0000-0000-000000000012"}';
 SELECT is(
@@ -392,10 +405,6 @@ SELECT is(
 );
 
 -- Table 5: categories
-INSERT INTO public.categories (id, name, slug, is_active) VALUES
-    ('97777777-0000-0000-0000-000000000001', 'Inactive Category M32', 'inactive-cat-m32', FALSE)
-ON CONFLICT (id) DO NOTHING;
-
 -- Positive: catalogManager (has categories:view) views inactive categories
 SET LOCAL request.jwt.claims = '{"sub": "90000000-0000-0000-0000-000000000016"}';
 SELECT is(
@@ -447,10 +456,6 @@ SELECT is(
 );
 
 -- Table 8: platform_vouchers
-INSERT INTO public.platform_vouchers (id, code, discount_type, discount_value, min_order_amount, is_active, start_date, end_date) VALUES
-    ('98888888-0000-0000-0000-000000000001', 'VOUCHER-M32', 'percentage', 10.00, 500.00, TRUE, NOW() - INTERVAL '1 day', NOW() + INTERVAL '10 days')
-ON CONFLICT (id) DO NOTHING;
-
 -- Positive: marketingManager (has promotions:view) views platform vouchers
 SET LOCAL request.jwt.claims = '{"sub": "90000000-0000-0000-0000-000000000018"}';
 SELECT is(

@@ -18,7 +18,7 @@ SET search_path = ''
 AS $$
 DECLARE
     v_buyer_id UUID;
-    v_order_id UUID;
+    v_order_id TEXT;
     v_order_number TEXT;
     v_normalized_payment_method TEXT;
     v_total_amount NUMERIC(12,2) := 0;

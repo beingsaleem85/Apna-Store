@@ -9,14 +9,14 @@ CREATE INDEX IF NOT EXISTS idx_products_category_active
     WHERE is_active = true;
 
 CREATE INDEX IF NOT EXISTS idx_products_seller_created 
-    ON public.products(seller_id, created_at DESC);
+    ON public.products(seller_store_id, created_at DESC);
 
 -- 2. Indexing Orders for Buyer and Seller Dashboards
 CREATE INDEX IF NOT EXISTS idx_orders_buyer_created 
-    ON public.orders(buyer_id, created_at DESC);
+    ON public.buyer_orders(customer_user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_orders_status_created 
-    ON public.orders(status, created_at DESC);
+    ON public.buyer_orders(status, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id 
     ON public.order_items(order_id);
