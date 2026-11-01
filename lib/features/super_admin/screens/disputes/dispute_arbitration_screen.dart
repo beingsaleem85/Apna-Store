@@ -55,6 +55,11 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
 
   final List<DisputeClaim> _claims = [];
   bool _isLoading = false;
+  int _currentOffset = 0;
+  static const int _pageSize = 20;
+  bool _hasMore = false;
+  bool _isLoadingMore = false;
+  int _totalServerClaims = 0;
 
   @override
   void initState() {
@@ -70,25 +75,84 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
     _fetchReturnRequests();
   }
 
-  Future<void> _fetchReturnRequests() async {
-    setState(() => _isLoading = true);
+  Future<void> _fetchReturnRequests({bool loadMore = false}) async {
+    if (loadMore) {
+      if (_isLoadingMore || !_hasMore) return;
+      setState(() => _isLoadingMore = true);
+    } else {
+      setState(() {
+        _isLoading = true;
+        _currentOffset = 0;
+        _hasMore = false;
+      });
+    }
+
     try {
-      final res = await Supabase.instance.client
-          .from('return_requests')
-          .select('id, order_id, reason, status, quantity, created_at, seller_store_id')
-          .order('created_at', ascending: false)
-          .limit(50);
+      final res = await Supabase.instance.client.rpc(
+        'admin_fetch_return_claims',
+        params: {
+          'p_limit': _pageSize,
+          'p_offset': _currentOffset,
+          'p_status': null,
+        },
+      );
+
       if (res is List && mounted) {
+        final List<DisputeClaim> newItems = [];
+        int count = 0;
+        for (final row in res) {
+          count = (row['total_count'] as num?)?.toInt() ?? 0;
+          newItems.add(DisputeClaim(
+            id: (row['id'] ?? '').toString().substring(0, 8).toUpperCase(),
+            rawId: (row['id'] ?? '').toString(),
+            orderId: (row['order_id'] ?? '').toString(),
+            productName: (row['product_name'] ?? 'Order Item').toString(),
+            buyerName: (row['customer_name'] ?? 'Verified Buyer').toString(),
+            sellerStoreName: (row['seller_store_name'] ?? 'Seller Store').toString(),
+            returnReason: (row['reason'] ?? 'Standard return request').toString(),
+            requestedAmount: ((row['requested_amount'] as num?)?.toDouble() ?? 0.0),
+            disputeStatus: (row['status'] ?? 'Pending').toString(),
+            date: DateTime.tryParse(row['created_at']?.toString() ?? '') ?? DateTime.now(),
+            isMerchantDispute: false,
+            returnTracking: 'TCS-RET-${row['order_id']}',
+          ));
+        }
+
         setState(() {
-          _claims.clear();
+          if (loadMore) {
+            _claims.addAll(newItems);
+            _currentOffset += newItems.length;
+          } else {
+            _claims.clear();
+            _claims.addAll(newItems);
+            _currentOffset = newItems.length;
+          }
+          _totalServerClaims = count;
+          _hasMore = _currentOffset < _totalServerClaims;
+        });
+      }
+    } catch (e) {
+      // Direct table query fallback with join
+      try {
+        final res = await Supabase.instance.client
+            .from('return_requests')
+            .select('id, order_id, reason, status, quantity, created_at, seller_store_id, seller_stores(name), buyer_orders(customer_name)')
+            .order('created_at', ascending: false)
+            .range(_currentOffset, _currentOffset + _pageSize - 1);
+
+        if (res is List && mounted) {
+          final List<DisputeClaim> newItems = [];
           for (final row in res) {
-            _claims.add(DisputeClaim(
+            final store = row['seller_stores'] is Map ? row['seller_stores']['name'] : null;
+            final order = row['buyer_orders'] is Map ? row['buyer_orders']['customer_name'] : null;
+
+            newItems.add(DisputeClaim(
               id: (row['id'] ?? '').toString().substring(0, 8).toUpperCase(),
               rawId: (row['id'] ?? '').toString(),
               orderId: (row['order_id'] ?? '').toString(),
               productName: 'Order Item #${row['order_id']}',
-              buyerName: 'Verified Buyer',
-              sellerStoreName: 'Seller Store',
+              buyerName: order?.toString() ?? 'Verified Buyer',
+              sellerStoreName: store?.toString() ?? 'Seller Store',
               returnReason: row['reason'] ?? 'Standard return request',
               requestedAmount: ((row['quantity'] as num?)?.toDouble() ?? 1.0) * 1000.0,
               disputeStatus: row['status'] ?? 'Pending',
@@ -97,12 +161,27 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
               returnTracking: 'TCS-RET-${row['order_id']}',
             ));
           }
+
+          setState(() {
+            if (loadMore) {
+              _claims.addAll(newItems);
+              _currentOffset += newItems.length;
+            } else {
+              _claims.clear();
+              _claims.addAll(newItems);
+              _currentOffset = newItems.length;
+            }
+            _hasMore = newItems.length == _pageSize;
+          });
+        }
+      } catch (_) {}
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingMore = false;
         });
       }
-    } catch (_) {
-      // Empty claims list will show empty state
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -597,9 +676,21 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
                                       hintText: 'Enter reason for rejecting return claim...',
                                     );
                                     if (reason != null && reason.isNotEmpty) {
-                                      setState(() => claim.disputeStatus = 'Rejected');
-                                      adminState.logAuditAction('DISPUTE_REJECTED', claim.id, 'Rejected claim. Reason: $reason');
-                                      if (mounted) SuperAdminDialogs.showToast(context, 'Claim Rejected.', isError: true);
+                                      try {
+                                        await Supabase.instance.client.rpc(
+                                          'admin_arbitrate_return_claim',
+                                          params: {
+                                            'p_claim_id': claim.rawId,
+                                            'p_decision': 'Rejected',
+                                            'p_notes': reason,
+                                          },
+                                        );
+                                        setState(() => claim.disputeStatus = 'Rejected');
+                                        adminState.logAuditAction('DISPUTE_REJECTED', claim.id, 'Rejected claim. Reason: $reason');
+                                        if (mounted) SuperAdminDialogs.showToast(context, 'Claim Rejected.', isError: true);
+                                      } catch (e) {
+                                        if (mounted) SuperAdminDialogs.showToast(context, 'Arbitration failed: $e', isError: true);
+                                      }
                                     }
                                   },
                                   child: const Text('Reject', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
@@ -613,6 +704,20 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
                   ),
                 );
               }).toList(),
+
+            if (_hasMore)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12.0),
+                child: Center(
+                  child: OutlinedButton.icon(
+                    icon: _isLoadingMore
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.arrow_downward, size: 14),
+                    label: Text(_isLoadingMore ? 'Loading More...' : 'Load More Claims (${_claims.length}/$_totalServerClaims)'),
+                    onPressed: _isLoadingMore ? null : () => _fetchReturnRequests(loadMore: true),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
