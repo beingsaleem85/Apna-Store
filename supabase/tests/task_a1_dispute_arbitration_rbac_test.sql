@@ -3,7 +3,7 @@
 -- ============================================================================
 
 BEGIN;
-SELECT plan(26);
+SELECT plan(39);
 
 -- ----------------------------------------------------------------------------
 -- 0. SEED TEST FIXTURES & USERS IN auth.users
@@ -78,15 +78,7 @@ VALUES
     ('55555555-0000-0000-0000-000000000002', 'ORD-COD-SHIPPED', '44444444-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', 'Item 2', 'SKU-2', 2500.00, 1, 2500.00, 10.00)
 ON CONFLICT (id) DO NOTHING;
 
--- Seed Separate Return Claims for each scenario:
--- Claim 1: Owner test
--- Claim 2: superAdmin test
--- Claim 3: disputeManager test
--- Claim 4: Denied roles tests
--- Claim 5: Missing notes test
--- Claim 6: Already completed claim
--- Claim 7: Shipped COD uncollected
--- Claim 8: Approved refund & duplicate test
+-- Seed Separate Return Claims for each scenario
 INSERT INTO public.return_requests (id, order_id, order_item_id, seller_store_id, customer_user_id, return_reason, quantity, status)
 VALUES
     ('20000000-0000-0000-0000-000000000001', 'ORD-COD-DELIVERED', '55555555-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Claim 1 for Owner', 1, 'Requested'),
@@ -187,7 +179,7 @@ SELECT throws_like(
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000017', true);
-    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Rejected', 'Order reject');
+    SELECT public.admin_arbitrate_return_claim('20000000-0000-0000-0000-000000000004'::uuid, 'Order reject');
     $$,
     '%Access denied: Insufficient administrative privileges%',
     '9. Staff role: orderManager is rejected with 42501'
@@ -270,28 +262,47 @@ SELECT throws_like(
 );
 
 -- ----------------------------------------------------------------------------
--- 17. ASSERTION: COD + Delivered order approval succeeds and writes status 'Completed'
+-- 17-20. ASSERTIONS: Approved Arbitration Execution & Ledger / Audit Effects
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
 
+-- Execute Approved arbitration in its own separate statement
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
+SELECT public.admin_arbitrate_return_claim(
+    '20000000-0000-0000-0000-000000000008'::uuid,
+    'Approved',
+    'Valid approval for collected COD order item'
+);
+
+-- 17. Status becomes 'Completed' in return_requests
 SELECT is(
-    (
-        SELECT rr.status
-        FROM (
-            SELECT public.admin_arbitrate_return_claim(
-                '20000000-0000-0000-0000-000000000008'::uuid,
-                'Approved',
-                'Valid approval for collected COD order item'
-            ) AS res
-        ) sub
-        JOIN public.return_requests rr ON rr.id = '20000000-0000-0000-0000-000000000008'
-    ),
+    (SELECT status FROM public.return_requests WHERE id = '20000000-0000-0000-0000-000000000008'),
     'Completed',
     '17. Approved arbitration succeeds on Delivered COD order and writes status Completed'
 );
 
+-- 18. Exactly one refund row created
+SELECT is(
+    (SELECT count(*)::INT FROM public.refunds WHERE order_id = 'ORD-COD-DELIVERED' AND order_item_id = '55555555-0000-0000-0000-000000000001'),
+    1,
+    '18. Exactly one refund record is created in public.refunds'
+);
+
+-- 19. Seller wallet debit transaction created with reversed amount
+SELECT is(
+    (SELECT count(*)::INT FROM public.wallet_transactions WHERE seller_store_id = '11111111-0000-0000-0000-000000000001' AND transaction_type = 'DEBIT' AND source_type = 'REFUND_REVERSAL'),
+    1,
+    '19. Seller wallet receives debit transaction for reversed payable'
+);
+
+-- 20. Audit row created with DISPUTE_FULL_REFUND
+SELECT is(
+    (SELECT count(*)::INT FROM public.audit_logs WHERE target_id = '20000000-0000-0000-0000-000000000008' AND action = 'DISPUTE_FULL_REFUND'),
+    1,
+    '20. Audit row created with action DISPUTE_FULL_REFUND'
+);
+
 -- ----------------------------------------------------------------------------
--- 18. ASSERTION: Calling arbitration twice throws P0003
+-- 21. ASSERTION: Calling arbitration twice throws P0003
 -- ----------------------------------------------------------------------------
 SELECT throws_like(
     $$
@@ -303,86 +314,203 @@ SELECT throws_like(
     );
     $$,
     '%already finalized%',
-    '18. Calling arbitration twice is blocked by finalized claim check'
+    '21. Calling arbitration twice is blocked by finalized claim check'
 );
 
 -- ----------------------------------------------------------------------------
--- 19-22. ASSERTIONS: Audit Log Security & Immutability Tests
+-- 22-23. ASSERTIONS: Audit Forgery Prevention (Direct INSERTs Blocked)
 -- ----------------------------------------------------------------------------
 
--- 19: Normal authenticated buyer reads 0 rows from audit_logs
+-- 22: Buyer direct INSERT into audit_logs is denied
+SELECT throws_like(
+    $$
+    SET LOCAL ROLE authenticated;
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+    INSERT INTO public.audit_logs (actor_user_id, actor_role, action, target_type, target_id)
+    VALUES ('10000000-0000-0000-0000-000000000001', 'buyer'::public.app_role, 'FORGERY', 'order', '1');
+    $$,
+    '%permission denied%',
+    '22. Buyer direct INSERT into audit_logs is denied with 42501'
+);
+RESET ROLE;
+
+-- 23: Buyer direct INSERT into admin_audit_logs view is denied
+SELECT throws_like(
+    $$
+    SET LOCAL ROLE authenticated;
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+    INSERT INTO public.admin_audit_logs (admin_id, action, target_type, target_id)
+    VALUES ('10000000-0000-0000-0000-000000000001', 'FORGERY', 'order', '1');
+    $$,
+    '%permission denied%',
+    '23. Buyer direct INSERT into admin_audit_logs view is denied with 42501'
+);
+RESET ROLE;
+
+-- ----------------------------------------------------------------------------
+-- 24-26. ASSERTIONS: Audit Log RLS Visibility Under authenticated Role
+-- ----------------------------------------------------------------------------
+
+-- 24: Normal authenticated buyer reads 0 rows under authenticated role
+SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
 SELECT is(
     (SELECT count(*)::INT FROM public.audit_logs),
     0,
-    '19. Normal user (buyer) reads 0 rows from audit_logs'
+    '24. Normal user (buyer) reads 0 rows from audit_logs under authenticated role'
 );
+RESET ROLE;
 
--- 20: Staff role without audit permission (catalogManager) reads 0 rows
+-- 25: Staff role without audit permission (catalogManager) reads 0 rows
+SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000016', true);
 SELECT is(
     (SELECT count(*)::INT FROM public.audit_logs),
     0,
-    '20. Staff role without audit access (catalogManager) reads 0 rows from audit_logs'
+    '25. Staff role without audit access (catalogManager) reads 0 rows from audit_logs under authenticated role'
 );
+RESET ROLE;
 
--- 21: Direct UPDATE on audit_logs fails for every role (trigger blocks)
+-- 26: Positive case: Staff role with audit access (auditor) CAN read rows (> 0)
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000021', true);
+SELECT cmp_ok(
+    (SELECT count(*)::INT FROM public.audit_logs),
+    '>',
+    0,
+    '26. Staff role with audit access (auditor) reads > 0 rows from audit_logs under authenticated role'
+);
+RESET ROLE;
+
+-- ----------------------------------------------------------------------------
+-- 27-28. ASSERTIONS: Audit Log Immutability Enforcement
+-- ----------------------------------------------------------------------------
+
+-- 27: Direct UPDATE on audit_logs fails for every role
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000010', true);
     UPDATE public.audit_logs SET action = 'TAMPERED';
     $$,
     '%immutable and cannot be modified or deleted%',
-    '21. Direct UPDATE on audit_logs fails for all roles'
+    '27. Direct UPDATE on audit_logs fails for all roles'
 );
 
--- 22: Direct DELETE on audit_logs fails for every role (trigger blocks)
+-- 28: Direct DELETE on audit_logs fails for every role
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000010', true);
     DELETE FROM public.audit_logs;
     $$,
     '%immutable and cannot be modified or deleted%',
-    '22. Direct DELETE on audit_logs fails for all roles'
+    '28. Direct DELETE on audit_logs fails for all roles'
 );
 
 -- ----------------------------------------------------------------------------
--- 23-26. ASSERTIONS: Staff Role Assignment Governance & Audit Tests
+-- 29-34. ASSERTIONS: Staff Role Assignment Governance & Audit Tests
 -- ----------------------------------------------------------------------------
 
--- 23: User cannot assign staff_role to themselves
+-- 29: User cannot assign staff_role to themselves
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
     SELECT public.admin_assign_staff_role('10000000-0000-0000-0000-000000000011'::uuid, 'disputeManager'::public.admin_staff_role);
     $$,
     '%Self-assignment of staff roles is prohibited%',
-    '23. User cannot assign staff_role to themselves'
+    '29. User cannot assign staff_role to themselves'
 );
 
--- 24: financeAdmin cannot assign roles (42501)
+-- 30: financeAdmin cannot assign roles (42501)
 SELECT throws_like(
     $$
     SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000013', true);
     SELECT public.admin_assign_staff_role('10000000-0000-0000-0000-000000000099'::uuid, 'supportAdmin'::public.admin_staff_role);
     $$,
     '%Access denied: Only Owner or Super Admin can assign staff roles%',
-    '24. financeAdmin cannot assign staff roles'
+    '30. financeAdmin cannot assign staff roles'
 );
 
--- 25: superAdmin can assign roles
+-- 31: superAdmin assigning superAdmin is rejected (Only Owner may assign superAdmin)
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
+    SELECT public.admin_assign_staff_role('10000000-0000-0000-0000-000000000099'::uuid, 'superAdmin'::public.admin_staff_role);
+    $$,
+    '%Only Owner can assign the superAdmin role%',
+    '31. superAdmin cannot assign the superAdmin role'
+);
+
+-- 32: owner assigning superAdmin succeeds
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000010', true);
+SELECT is(
+    (public.admin_assign_staff_role('10000000-0000-0000-0000-000000000099'::uuid, 'superAdmin'::public.admin_staff_role) ->> 'success')::BOOLEAN,
+    TRUE,
+    '32. Owner can successfully assign the superAdmin role'
+);
+
+-- 33: superAdmin can assign other staff roles (supportAdmin)
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
 SELECT is(
     (public.admin_assign_staff_role('10000000-0000-0000-0000-000000000099'::uuid, 'supportAdmin'::public.admin_staff_role) ->> 'success')::BOOLEAN,
     TRUE,
-    '25. superAdmin can successfully assign staff roles'
+    '33. superAdmin can successfully assign supportAdmin role'
 );
 
--- 26: Assignment writes an audit row
+-- 34: Assignment writes an audit row
 SELECT is(
     (SELECT count(*)::INT FROM public.audit_logs WHERE target_id = '10000000-0000-0000-0000-000000000099' AND action = 'STAFF_ROLE_ASSIGNED'),
+    2,
+    '34. Both staff role assignments wrote rows to public.audit_logs'
+);
+
+-- ----------------------------------------------------------------------------
+-- 35-38. ASSERTIONS: Staff Role Revocation Governance & Audit Tests
+-- ----------------------------------------------------------------------------
+
+-- 35: Self-revocation is prohibited
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
+    SELECT public.admin_revoke_staff_role('10000000-0000-0000-0000-000000000011'::uuid);
+    $$,
+    '%Self-revocation of staff roles is prohibited%',
+    '35. User cannot revoke their own staff role'
+);
+
+-- 36: financeAdmin cannot revoke roles (42501)
+SELECT throws_like(
+    $$
+    SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000013', true);
+    SELECT public.admin_revoke_staff_role('10000000-0000-0000-0000-000000000099'::uuid);
+    $$,
+    '%Access denied: Only Owner or Super Admin can revoke staff roles%',
+    '36. financeAdmin cannot revoke staff roles'
+);
+
+-- 37: superAdmin can revoke a regular staff role (supportAdmin)
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000011', true);
+SELECT is(
+    (public.admin_revoke_staff_role('10000000-0000-0000-0000-000000000099'::uuid) ->> 'success')::BOOLEAN,
+    TRUE,
+    '37. superAdmin can successfully revoke supportAdmin role'
+);
+
+-- 38: Revocation writes an audit row
+SELECT is(
+    (SELECT count(*)::INT FROM public.audit_logs WHERE target_id = '10000000-0000-0000-0000-000000000099' AND action = 'STAFF_ROLE_REVOKED'),
     1,
-    '26. Staff role assignment writes a row to public.audit_logs'
+    '38. Staff role revocation wrote row to public.audit_logs'
+);
+
+-- ----------------------------------------------------------------------------
+-- 39. ASSERTION: Foreign Key Safety on auth.users deletion
+-- ----------------------------------------------------------------------------
+SELECT throws_like(
+    $$
+    DELETE FROM auth.users WHERE id = '10000000-0000-0000-0000-000000000011';
+    $$,
+    '%violates foreign key constraint%',
+    '39. Deleting a user with records in audit_logs is blocked by FK constraint NO ACTION'
 );
 
 SELECT * FROM finish();
