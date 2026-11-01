@@ -9,6 +9,25 @@
 - [x] **Unnumbered SQL Archived:** Cleaned root and migrations folders; moved combined scripts into `supabase/archive/`.
 - [ ] **Daily Backups & PITR:** Enable Point-in-Time Recovery (PITR) in Supabase Dashboard (Database -> Backups).
 - [ ] **First Super Admin Bootstrap:** Run `INSERT INTO public.user_roles (user_id, role) VALUES ('<SUPER_ADMIN_AUTH_UID>', 'owner');` via Supabase SQL Editor.
+- [ ] **Required Database Extensions (`pg_cron`, `pg_net`):**
+  Ensure extensions are enabled in Supabase Dashboard (Database -> Extensions) or via SQL Editor:
+  ```sql
+  CREATE EXTENSION IF NOT EXISTS pg_cron;
+  CREATE EXTENSION IF NOT EXISTS pg_net;
+  ```
+- [ ] **Automated Escrow Maturity Schedule (`pg_cron`):**
+  Schedule hourly execution of `release_mature_held_seller_earnings()` to release matured 7-day seller earnings from escrow into available balances:
+  ```sql
+  SELECT cron.schedule(
+      'release-mature-held-earnings-hourly',
+      '0 * * * *',
+      $$SELECT public.release_mature_held_seller_earnings()$$
+  );
+  ```
+  **Verification Query:**
+  ```sql
+  SELECT jobid, jobname, schedule, active FROM cron.job WHERE jobname = 'release-mature-held-earnings-hourly';
+  ```
 
 ## 2. Client Application Hardening
 - [x] **Zero Secrets in Client:** No API keys, JWT secrets, or cloud tokens hardcoded in Flutter source code (`test/task2_zero_secrets_audit_test.dart` passes).
