@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/app_breakpoints.dart';
-import '../../core/theme/admin_theme.dart';
 import '../../core/widgets/admin_toast_dialog.dart';
 import '../../services/super_admin_provider.dart';
 
@@ -140,7 +139,7 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
             .order('created_at', ascending: false)
             .range(_currentOffset, _currentOffset + _pageSize - 1);
 
-        if (res is List && mounted) {
+        if (mounted) {
           final List<DisputeClaim> newItems = [];
           for (final row in res) {
             final store = row['seller_stores'] is Map ? row['seller_stores']['name'] : null;
@@ -499,7 +498,14 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
             ),
             const SizedBox(height: 8),
 
-            if (filteredClaims.isEmpty)
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.all(40.0),
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (filteredClaims.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(40.0),
                 child: Column(
@@ -703,7 +709,7 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
                     ),
                   ),
                 );
-              }).toList(),
+              }),
 
             if (_hasMore)
               Padding(
@@ -756,11 +762,11 @@ class _DisputeArbitrationScreenState extends State<DisputeArbitrationScreen> wit
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
+              const Row(
                 children: [
-                  const Icon(Icons.gavel_rounded, color: Color(0xFF0F172A), size: 20),
-                  const SizedBox(width: 8),
-                  Text('Arbitration Dossier', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  Icon(Icons.gavel_rounded, color: Color(0xFF0F172A), size: 20),
+                  SizedBox(width: 8),
+                  Text('Arbitration Dossier', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                 ],
               ),
               Container(
