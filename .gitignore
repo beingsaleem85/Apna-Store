@@ -27,6 +27,9 @@ analyze_output.txt
 # Node.js
 node_modules/
 
+# Supabase
+supabase/.temp/
+
 # Android local SDK configuration
 android/local.properties
 android/key.properties
