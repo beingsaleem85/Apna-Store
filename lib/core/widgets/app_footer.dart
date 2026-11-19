@@ -38,11 +38,11 @@ class AppFooter extends StatelessWidget {
     String description;
     switch (title) {
       case 'Privacy Policy':
-        description = 'Apna Store respects your privacy. All customer data, KYC documents, and financial records are encrypted and protected under strict role-based access control and Pakistan data protection regulations.';
+        description = 'Elegant Marketplace respects your privacy. All customer data, KYC documents, and financial records are encrypted and protected under strict role-based access control and Pakistan data protection regulations.';
         break;
       case 'Terms & Conditions':
       case 'Terms':
-        description = 'By using Apna Store, buyers and sellers agree to our marketplace fair trade terms, authentic product guidelines, and platform escrow policies.';
+        description = 'By using Elegant Marketplace, buyers and sellers agree to our marketplace fair trade terms, authentic product guidelines, and platform escrow policies.';
         break;
       case 'Return Policy':
         description = 'Enjoy a 7-day hassle-free return window for eligible products. Returns can be initiated directly from your My Orders dashboard.';
@@ -51,10 +51,10 @@ class AppFooter extends StatelessWidget {
         description = 'Approved returns and cancellations are refunded back to your original payment method or wallet within 2-4 business days.';
         break;
       case 'Commission Policy':
-        description = 'Apna Store charges standard commission take-rates per verified category, with automated ledger settlement upon delivery confirmation.';
+        description = 'Elegant Marketplace charges standard commission take-rates per verified category, with automated ledger settlement upon delivery confirmation.';
         break;
       default:
-        description = '$title is available and supported on Apna Store. Please contact our 24/7 support desk for specific inquiries.';
+        description = '$title is available and supported on Elegant Marketplace. Please contact our 24/7 support desk for specific inquiries.';
         break;
     }
 
@@ -260,7 +260,7 @@ class AppFooter extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        '© 2026 Apna Store. All Rights Reserved.',
+                        '© 2026 Elegant Marketplace. All Rights Reserved.',
                         style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 12),
                       ),
                       const SizedBox(width: 24),
@@ -332,7 +332,7 @@ class AppFooter extends StatelessWidget {
         return StatefulBuilder(
           builder: (context, setStateHover) {
             return InkWell(
-              onTap: () => _showInfoDialog(context, 'Apna Store ${social['name']}'),
+              onTap: () => _showInfoDialog(context, 'Elegant Marketplace ${social['name']}'),
               onHover: (hover) {
                 setStateHover(() {
                   isHovered = hover;
@@ -423,7 +423,7 @@ class AppFooter extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             InkWell(
-              onTap: () => _showInfoDialog(context, 'Apna Store Google Play App'),
+              onTap: () => _showInfoDialog(context, 'Elegant Marketplace Google Play App'),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -443,7 +443,7 @@ class AppFooter extends StatelessWidget {
             ),
             const SizedBox(height: 5),
             InkWell(
-              onTap: () => _showInfoDialog(context, 'Apna Store iOS App Store'),
+              onTap: () => _showInfoDialog(context, 'Elegant Marketplace iOS App Store'),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(

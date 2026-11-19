@@ -1,11 +1,11 @@
 {
-    "name": "Apna Store",
-    "short_name": "Apna Store",
+    "name": "Elegant Marketplace",
+    "short_name": "Elegant",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#120E2B",
     "theme_color": "#6C5CE7",
-    "description": "Apna Store — Premier online marketplace connecting buyers, verified local sellers, and store management.",
+    "description": "Elegant Marketplace — Premier online marketplace connecting buyers, verified local sellers, and store management.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

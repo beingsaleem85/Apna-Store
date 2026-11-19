@@ -516,7 +516,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'You are signed in, but you do not have a registered seller store yet. Complete registration to start selling on Apna Store.',
+                  'You are signed in, but you do not have a registered seller store yet. Complete registration to start selling on Elegant Marketplace.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
                 ),

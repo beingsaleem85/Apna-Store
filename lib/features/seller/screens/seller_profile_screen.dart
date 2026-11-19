@@ -139,7 +139,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Store Name: ${store?.shopName ?? "Apna Store Vendor"} | Email: ${store?.email ?? "seller@apnastore.com"}',
+                                'Store Name: ${store?.shopName ?? "Marketplace Vendor"} | Email: ${store?.email ?? "seller@apnastore.com"}',
                                 style: const TextStyle(fontSize: 13, color: AppTheme.lightText),
                               ),
                               const SizedBox(height: 4),
@@ -311,7 +311,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Verified Merchant Account', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 14)),
-                    Text('Your identity details and CNIC documentation have been verified by Apna Store Admin.', style: TextStyle(fontSize: 12, color: AppTheme.darkText)),
+                    Text('Your identity details and CNIC documentation have been verified by Elegant Marketplace Admin.', style: TextStyle(fontSize: 12, color: AppTheme.darkText)),
                   ],
                 ),
               ),

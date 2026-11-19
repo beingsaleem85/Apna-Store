@@ -159,7 +159,7 @@ class _SellerLoginScreenState extends State<SellerLoginScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text('Want to sell on Apna Store?', style: TextStyle(color: AppTheme.lightText, fontSize: 13)),
+                        const Text('Want to sell on Elegant Marketplace?', style: TextStyle(color: AppTheme.lightText, fontSize: 13)),
                         TextButton(
                           onPressed: () {
                             Navigator.pushNamed(context, '/seller/register');
@@ -775,7 +775,7 @@ class _SellerRegisterScreenState extends State<SellerRegisterScreen> {
               ),
               const Expanded(
                 child: Text(
-                  'I agree to the Apna Store Seller Terms & Conditions and Commission Agreement Policy.',
+                  'I agree to the Elegant Marketplace Seller Terms & Conditions and Commission Agreement Policy.',
                   style: TextStyle(fontSize: 12, color: AppTheme.darkText),
                 ),
               ),

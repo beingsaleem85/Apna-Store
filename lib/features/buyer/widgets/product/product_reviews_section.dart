@@ -70,7 +70,7 @@ class _ProductReviewsSectionState extends State<ProductReviewsSection> {
     {
       'user': 'Usman R.',
       'rating': 5,
-      'comment': 'Packaging was very safe with multi-layer bubble wrap. Extremely trusted seller on Apna Store!',
+      'comment': 'Packaging was very safe with multi-layer bubble wrap. Extremely trusted seller on Elegant Marketplace!',
       'date': '1 week ago',
     },
   ];

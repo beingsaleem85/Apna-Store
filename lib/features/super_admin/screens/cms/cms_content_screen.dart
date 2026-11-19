@@ -74,9 +74,9 @@ class _CmsContentScreenState extends State<CmsContentScreen> with SingleTickerPr
       slug: 'terms-of-service',
       version: 'v2.4',
       lastUpdated: '2026-08-15',
-      content: '''1. Acceptance of Terms: By accessing or purchasing from Apna Store, you agree to comply with all applicable Pakistani trade and e-commerce laws.
+      content: '''1. Acceptance of Terms: By accessing or purchasing from Elegant Marketplace, you agree to comply with all applicable Pakistani trade and e-commerce laws.
 2. User Accounts: Customers must provide accurate shipping addresses and verified mobile numbers for OTP authentication.
-3. Order Acceptance & Pricing: Apna Store reserves the right to cancel orders with obvious pricing typographical errors before dispatch.
+3. Order Acceptance & Pricing: Elegant Marketplace reserves the right to cancel orders with obvious pricing typographical errors before dispatch.
 4. Prohibited Activities: Fraudulent chargebacks, abusive seller ratings, or harassment of delivery riders will result in permanent CNIC/phone blacklisting.''',
     ),
     LegalDocModel(
@@ -86,7 +86,7 @@ class _CmsContentScreenState extends State<CmsContentScreen> with SingleTickerPr
       version: 'v2.1',
       lastUpdated: '2026-08-10',
       content: '''1. Data Collection: We collect recipient names, phone numbers, GPS delivery coordinates, and email addresses solely for dispatching marketplace orders.
-2. Payment Security: Apna Store never stores credit card CVVs or bank passwords. All transactions are securely tokenized via 1LINK, PayFast, and Meezan Bank 3D-Secure gateways.
+2. Payment Security: Elegant Marketplace never stores credit card CVVs or bank passwords. All transactions are securely tokenized via 1LINK, PayFast, and Meezan Bank 3D-Secure gateways.
 3. Third-Party Sharing: Shipping details are shared strictly with contracted 3PL couriers (TCS, Leopards, CallCourier) to fulfill delivery.''',
     ),
     LegalDocModel(
@@ -131,7 +131,7 @@ class _CmsContentScreenState extends State<CmsContentScreen> with SingleTickerPr
     ),
     FaqItem(
       id: 'FAQ-04',
-      question: 'How does Apna Store calculate commission fees?',
+      question: 'How does Elegant Marketplace calculate commission fees?',
       answer: 'Category-level commission (between 3.5% to 12%) is automatically deducted from order subtotal before merchant disbursals.',
       category: 'Seller',
     ),

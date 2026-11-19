@@ -44,7 +44,7 @@ class _PlatformConfigScreenState extends State<PlatformConfigScreen> with Single
   late TabController _tabController;
 
   // System Settings Controllers
-  final TextEditingController _appNameController = TextEditingController(text: 'Apna Store Marketplace Pakistan');
+  final TextEditingController _appNameController = TextEditingController(text: 'Elegant Marketplace Pakistan');
   final TextEditingController _supportEmailController = TextEditingController(text: 'support@apnastore.pk');
   final TextEditingController _supportPhoneController = TextEditingController(text: '+92 42 111 276 276');
   final TextEditingController _baseCurrencyController = TextEditingController(text: 'PKR (Rs.)');

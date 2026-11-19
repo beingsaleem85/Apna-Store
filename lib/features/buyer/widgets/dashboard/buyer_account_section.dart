@@ -243,7 +243,7 @@ class _BuyerAccountSectionState extends State<BuyerAccountSection> {
                             child: const Center(child: Icon(Icons.storefront, color: Colors.white, size: 18)),
                           ),
                           const SizedBox(width: 8),
-                          const Text('APNA STORE', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF004D40))),
+                          const Text('ELEGANT MARKETPLACE', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF004D40))),
                         ],
                       ),
                     ),

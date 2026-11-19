@@ -137,7 +137,7 @@ class _BuyerAuthOnboardingScreenState extends State<BuyerAuthOnboardingScreen> {
                                 }
                               } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Mobile Login Successful! Welcome to Apna Store.')),
+                                  const SnackBar(content: Text('Mobile Login Successful! Welcome to Elegant Marketplace.')),
                                 );
                               }
                             },

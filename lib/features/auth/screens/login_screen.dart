@@ -83,7 +83,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const Icon(Icons.stars, size: 72, color: Color(0xFFFFD700)),
                       const SizedBox(height: 16),
                       const Text(
-                        'Apna Store Multi-Vendor',
+                        'Elegant Marketplace',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 24,

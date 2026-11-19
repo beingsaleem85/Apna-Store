@@ -213,7 +213,7 @@ class _AllRecommendedScreenState extends State<AllRecommendedScreen> {
                 ),
                 const SizedBox(width: 10),
                 const Text(
-                  'Apna Store',
+                  'Elegant Marketplace',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 20,
@@ -585,7 +585,7 @@ class _AllRecommendedScreenState extends State<AllRecommendedScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text(
-                              '© 2026 Apna Store. All Rights Reserved.',
+                              '© 2026 Elegant Marketplace. All Rights Reserved.',
                               style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 12),
                             ),
                             const SizedBox(width: 48),
@@ -600,7 +600,7 @@ class _AllRecommendedScreenState extends State<AllRecommendedScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '© 2026 Apna Store. All Rights Reserved.',
+                              '© 2026 Elegant Marketplace. All Rights Reserved.',
                               style: TextStyle(color: Color(0xFFD1D5DB), fontSize: 12),
                             ),
                             SizedBox(height: 6),

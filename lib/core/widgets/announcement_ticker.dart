@@ -18,11 +18,11 @@ class _AnnouncementTickerState extends State<AnnouncementTicker> {
   final ScrollController _scrollController = ScrollController();
 
   final List<String> _defaultAnnouncements = [
-    '🚀 Welcome to Apna Store — Pakistan\'s Premier E-Commerce Marketplace!',
+    '🚀 Welcome to Elegant Marketplace — Pakistan\'s Premier E-Commerce Marketplace!',
     '⚡ Flash Sale Live Now! Up to 50% OFF on Mobiles, Electronics & Fashion',
     '🚚 Free Shipping on Orders Above Rs. 1,999 | Cash on Delivery Nationwide',
     '🔒 100% Authentic Products Guaranteed | Easy 7-Day Return Policy',
-    '🏪 Want to Sell on Apna Store? Register your store today & expand your business!',
+    '🏪 Want to Sell on Elegant Marketplace? Register your store today & expand your business!',
   ];
 
   @override

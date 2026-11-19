@@ -57,7 +57,7 @@ class _BuyerDynamicHomeScreenState extends State<BuyerDynamicHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Apna Store — Personalized Home'),
+        title: const Text('Elegant Marketplace — Personalized Home'),
         backgroundColor: const Color(0xFF004D40),
         actions: [
           IconButton(

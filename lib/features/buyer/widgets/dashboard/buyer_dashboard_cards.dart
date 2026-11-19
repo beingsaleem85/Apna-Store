@@ -58,7 +58,7 @@ class _MarketplaceProductCardWidgetState extends State<_MarketplaceProductCardWi
                 name: title,
                 price: cleanPrice.isEmpty ? '3455' : cleanPrice,
                 rating: rating,
-                description: 'High quality premium product available on Apna Store.',
+                description: 'High quality premium product available on Elegant Marketplace.',
                 imageUrl: imgUrl,
                 category: 'Electronics',
                 variations: const [],

@@ -704,7 +704,7 @@ class _BuyerAddressLocationScreenState extends State<BuyerAddressLocationScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('© 2026 Apna Store. All rights reserved.', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  const Text('© 2026 Elegant Marketplace. All rights reserved.', style: TextStyle(color: Colors.white70, fontSize: 11)),
                   const Row(
                     children: [
                       Icon(Icons.lock, size: 12, color: Colors.amber),
@@ -741,7 +741,7 @@ class _BuyerAddressLocationScreenState extends State<BuyerAddressLocationScreen>
     );
   }
 
-  // 7. Light Grey Customer Care, Apna Store Info & Mobile App Download Badges (Exact 1:1 match to screenshot)
+  // 7. Light Grey Customer Care, Elegant Marketplace Info & Mobile App Download Badges (Exact 1:1 match to screenshot)
   Widget _buildCustomerCareAndAppDownloadSection() {
     return Container(
       color: const Color(0xFFEFF0F5),
@@ -760,16 +760,16 @@ class _BuyerAddressLocationScreenState extends State<BuyerAddressLocationScreen>
                 children: [
                   Text('Customer Care', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF004D40))),
                   SizedBox(height: 10),
-                  Text('Help Center\nHow to Buy\nCorporate & Bulk Purchasing\nReturns & Refunds\nApna Store Shop\nContact Us\nPurchase Protection', style: TextStyle(fontSize: 11, color: Colors.black87, height: 1.7)),
+                  Text('Help Center\nHow to Buy\nCorporate & Bulk Purchasing\nReturns & Refunds\nElegant Marketplace Shop\nContact Us\nPurchase Protection', style: TextStyle(fontSize: 11, color: Colors.black87, height: 1.7)),
                 ],
               ),
-              // Column 2: Apna Store
+              // Column 2: Elegant Marketplace
               const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Apna Store', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF004D40))),
+                  Text('Elegant Marketplace', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF004D40))),
                   SizedBox(height: 10),
-                  Text('About Us\nDigital Payments\nTerms & Conditions\nPrivacy Policy\nNTN Number: 4012118-6\nSTRN Number: 1700401211818\nOnline Shopping App\nSell on Apna Store\nJoin Affiliate Program', style: TextStyle(fontSize: 11, color: Colors.black87, height: 1.7)),
+                  Text('About Us\nDigital Payments\nTerms & Conditions\nPrivacy Policy\nNTN Number: 4012118-6\nSTRN Number: 1700401211818\nOnline Shopping App\nSell on Elegant Marketplace\nJoin Affiliate Program', style: TextStyle(fontSize: 11, color: Colors.black87, height: 1.7)),
                 ],
               ),
               // Column 3: Happy Shopping App Download Badges

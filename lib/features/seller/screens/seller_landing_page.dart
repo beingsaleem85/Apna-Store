@@ -136,7 +136,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Apna Store',
+                'Elegant',
                 style: TextStyle(
                   color: AppTheme.primaryGreen,
                   fontWeight: FontWeight.bold,
@@ -270,7 +270,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
               Icon(Icons.stars_rounded, color: AppTheme.secondaryGold, size: 18),
               const SizedBox(width: 8),
               Text(
-                'GROWTH POWERED BY APNA STORE',
+                'GROWTH POWERED BY ELEGANT MARKETPLACE',
                 style: TextStyle(
                   color: AppTheme.secondaryGold,
                   fontWeight: FontWeight.bold,
@@ -283,7 +283,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
         ),
         const SizedBox(height: 20),
         const Text(
-          'Start Selling with\nApna Store Marketplace',
+          'Start Selling with\nElegant Marketplace',
           style: TextStyle(
             color: Colors.white,
             fontSize: 42,
@@ -540,7 +540,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
               ),
               const Divider(height: 24),
               const Text(
-                'By signing in, you agree to Apna Store Merchant Agreement and Privacy Policy.',
+                'By signing in, you agree to Elegant Marketplace Merchant Agreement and Privacy Policy.',
                 style: TextStyle(fontSize: 11, color: AppTheme.lightText, height: 1.3),
                 textAlign: TextAlign.center,
               ),
@@ -582,7 +582,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
           constraints: const BoxConstraints(maxWidth: 1200),
           child: Column(
             children: [
-              _buildSectionHeader('Why Sell on Apna Store?', 'Everything you need to grow your retail business online nationwide'),
+              _buildSectionHeader('Why Sell on Elegant Marketplace?', 'Everything you need to grow your retail business online nationwide'),
               const SizedBox(height: 50),
               GridView.builder(
                 shrinkWrap: true,
@@ -740,7 +740,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
         'cat': 'Leather & Fashion',
         'sales': 'PKR 1,250,000 / mo',
         'rating': '5.0 ⭐',
-        'story': 'Apna Store enabled us to take our traditional leather workshop in Lahore to customers across Pakistan. Weekly payouts and low fees keep our business thriving.',
+        'story': 'Elegant Marketplace enabled us to take our traditional leather workshop in Lahore to customers across Pakistan. Weekly payouts and low fees keep our business thriving.',
         'image': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&q=80'
       },
       {
@@ -750,7 +750,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
         'cat': 'Traditional Perfumes',
         'sales': 'PKR 850,000 / mo',
         'rating': '4.9 ⭐',
-        'story': 'We started with just 3 traditional attar scents. Today, Apna Store marketing tools and flash sales have helped us build a brand with thousands of repeat buyers.',
+        'story': 'We started with just 3 traditional attar scents. Today, Elegant Marketplace marketing tools and flash sales have helped us build a brand with thousands of repeat buyers.',
         'image': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80'
       },
       {
@@ -777,7 +777,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
           constraints: const BoxConstraints(maxWidth: 1200),
           child: Column(
             children: [
-              _buildSectionHeader('Seller Success Stories', 'Real merchants growing their revenue every single day on Apna Store'),
+              _buildSectionHeader('Seller Success Stories', 'Real merchants growing their revenue every single day on Elegant Marketplace'),
               const SizedBox(height: 50),
               GridView.builder(
                 shrinkWrap: true,
@@ -1072,12 +1072,12 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
   Widget _buildFaqSection(bool isDesktop) {
     final faqs = [
       {
-        'q': 'How do I register as a seller on Apna Store?',
+        'q': 'How do I register as a seller on Elegant Marketplace?',
         'a': 'Click on "Register Now", complete the 3-step onboarding form (Personal Info, Shop Setup, and OTP verification), and submit your application. Your store will be reviewed within 24 hours.'
       },
       {
-        'q': 'What are the commission fees for selling on Apna Store?',
-        'a': 'Apna Store charges a transparent flat commission rate of 8% to 12% depending on the product category. There are no hidden listing fees or signup charges!'
+        'q': 'What are the commission fees for selling on Elegant Marketplace?',
+        'a': 'Elegant Marketplace charges a transparent flat commission rate of 8% to 12% depending on the product category. There are no hidden listing fees or signup charges!'
       },
       {
         'q': 'When and how will I receive my seller payments?',
@@ -1109,7 +1109,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
           constraints: const BoxConstraints(maxWidth: 900),
           child: Column(
             children: [
-              _buildSectionHeader('Frequently Asked Questions', 'Quick answers to common questions about selling on Apna Store'),
+              _buildSectionHeader('Frequently Asked Questions', 'Quick answers to common questions about selling on Elegant Marketplace'),
               const SizedBox(height: 50),
               ListView.builder(
                 shrinkWrap: true,
@@ -1179,7 +1179,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'Ready to Start Selling on Apna Store?',
+                'Ready to Start Selling on Elegant Marketplace?',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 34,
@@ -1265,7 +1265,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
                             ),
                             const SizedBox(width: 10),
                             const Text(
-                              'Apna Store Seller Center',
+                              'Elegant Marketplace Seller Center',
                               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                           ],
@@ -1327,7 +1327,7 @@ class _SellerLandingPageState extends State<SellerLandingPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    '© 2026 Apna Store. All rights reserved.',
+                    '© 2026 Elegant Marketplace. All rights reserved.',
                     style: TextStyle(color: Colors.white38, fontSize: 12),
                   ),
                   Row(

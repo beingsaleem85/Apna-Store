@@ -236,7 +236,7 @@ class _BuyerCheckoutScreenState extends State<BuyerCheckoutScreen> {
                                 ),
                                 const SizedBox(width: 10),
                                 const Text(
-                                  'Apna Store',
+                                  'Elegant Marketplace',
                                   style: TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w900,

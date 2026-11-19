@@ -51,7 +51,7 @@ class BuyerOrderSuccessScreen extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 10),
                                 const Text(
-                                  'Apna Store',
+                                  'Elegant Marketplace',
                                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
                                 ),
                               ],

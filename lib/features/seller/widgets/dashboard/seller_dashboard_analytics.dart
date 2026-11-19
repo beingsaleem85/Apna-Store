@@ -153,7 +153,7 @@ class SellerPerformanceSummarySection extends StatelessWidget {
                 const Text('Buyer Traffic Source & Acquisition Funnel', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                 const SizedBox(height: 14),
                 _buildChannelRow('Organic Search & Marketplace Browsing', '6,800 Visitors (47.7%)', 0.477, const Color(0xFF059669)),
-                _buildChannelRow('Apna Store Homepage Recommendation', '4,200 Visitors (29.5%)', 0.295, const Color(0xFF0284C7)),
+                _buildChannelRow('Elegant Marketplace Homepage Recommendation', '4,200 Visitors (29.5%)', 0.295, const Color(0xFF0284C7)),
                 _buildChannelRow('Social Media & Direct Links', '2,100 Visitors (14.7%)', 0.147, const Color(0xFF7C3AED)),
                 _buildChannelRow('Sponsored Product Ads (CPC)', '1,150 Visitors (8.1%)', 0.081, const Color(0xFFEA580C)),
               ],

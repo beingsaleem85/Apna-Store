@@ -43,7 +43,7 @@ class CheckoutActionBar extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         const Text(
-          'By placing this order, you agree to Apna Store Terms of Service & Return Policy.',
+          'By placing this order, you agree to Elegant Marketplace Terms of Service & Return Policy.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
         ),

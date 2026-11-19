@@ -668,9 +668,9 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: const [
-                        Text('Apna Store', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                        Text('Elegant Marketplace', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
                         SizedBox(height: 12),
-                        Text('About Us\nDigital Payments\nApna Store Card\nBlogs & News\nTerms & Conditions', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, height: 1.8)),
+                        Text('About Us\nDigital Payments\nElegant Marketplace Card\nBlogs & News\nTerms & Conditions', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, height: 1.8)),
                       ],
                     ),
                   ),
@@ -678,7 +678,7 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: const [
-                        Text('Sell On Apna Store', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                        Text('Sell On Elegant Marketplace', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
                         SizedBox(height: 12),
                         Text('Seller Registration\nSeller University\nSell on Global Market\nCode of Conduct', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, height: 1.8)),
                       ],
@@ -699,7 +699,7 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
               const SizedBox(height: 30),
               const Divider(color: Color(0xFF334155)),
               const SizedBox(height: 12),
-              const Text('© 2026 Apna Store Elegant Marketplace. All Rights Reserved.', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+              const Text('© 2026 Elegant Marketplace. All Rights Reserved.', style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
             ],
           ),
         ),

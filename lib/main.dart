@@ -87,7 +87,7 @@ class ApnaStoreApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Apna Store Multi-Vendor',
+      title: 'Elegant Marketplace',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       initialRoute: '/',

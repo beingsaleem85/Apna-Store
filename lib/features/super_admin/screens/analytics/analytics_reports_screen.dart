@@ -169,7 +169,7 @@ class _AnalyticsReportsScreenState extends State<AnalyticsReportsScreen> {
               _buildMetricCard(
                 title: 'Platform Net Commission',
                 value: 'Rs. ${platformCommission.toInt()}',
-                sub: 'Apna Store fee income',
+                sub: 'Platform fee income',
                 icon: Icons.monetization_on_outlined,
                 iconColor: const Color(0xFF059669),
                 bgColor: const Color(0xFFECFDF5),

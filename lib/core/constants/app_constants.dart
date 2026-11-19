@@ -15,7 +15,7 @@ class AppConstants {
   static const int defaultPageSize = 20;
 
   /// App display name
-  static const String appName = 'Apna Store';
+  static const String appName = 'Elegant Marketplace';
 
   /// Standard customer care hotline
   static const String customerSupportPhone = '042-111-276-278';

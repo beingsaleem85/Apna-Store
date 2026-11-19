@@ -542,7 +542,7 @@ class _CustomerAuthDialogState extends State<CustomerAuthDialog> with SingleTick
 
                 // Terms & Privacy Links
                 const Text(
-                  'By signing in, you agree to Apna Store’s Terms of Service and Privacy Policy.',
+                  'By signing in, you agree to Elegant Marketplace’s Terms of Service and Privacy Policy.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8), height: 1.4),
                 ),

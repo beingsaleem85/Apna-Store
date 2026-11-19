@@ -950,7 +950,7 @@ class _FraudSecurityScreenState extends State<FraudSecurityScreen> with SingleTi
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Blacklisted IP Ranges & Firewall Banned Subnets', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                    Text('Inbound connections from these IPs are automatically rejected by Apna Store Web Application Firewall (WAF).', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                    Text('Inbound connections from these IPs are automatically rejected by Elegant Marketplace Web Application Firewall (WAF).', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
                   ],
                 ),
                 ElevatedButton.icon(

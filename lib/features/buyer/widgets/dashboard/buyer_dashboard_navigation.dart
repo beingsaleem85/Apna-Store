@@ -136,7 +136,7 @@ class BuyerDashboardPremiumFooter extends StatelessWidget {
               const SizedBox(height: 40),
               Center(
                 child: Text(
-                  '© 2026 Apna Store Multivendor Marketplace. All rights reserved.',
+                  '© 2026 Elegant Marketplace Multivendor. All rights reserved.',
                   style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
                 ),
               ),

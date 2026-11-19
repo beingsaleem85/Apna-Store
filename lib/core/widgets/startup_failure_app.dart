@@ -13,7 +13,7 @@ class StartupFailureApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Apna Store — Configuration Error',
+      title: 'Elegant Marketplace — Configuration Error',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0F172A),
@@ -50,7 +50,7 @@ class StartupFailureApp extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(
                   errorMessage ??
-                      'Apna Store requires valid Supabase environment credentials to run. Please pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=... when launching the app.',
+                      'Elegant Marketplace requires valid Supabase environment credentials to run. Please pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=... when launching the app.',
                   style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8), height: 1.5),
                   textAlign: TextAlign.center,
                 ),
